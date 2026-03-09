@@ -2,7 +2,7 @@
 
 Веб-панель для управления MTProto прокси ([mtg v2](https://github.com/9seconds/mtg)) на нескольких серверах через SSH.
 
-![Stack](https://img.shields.io/badge/Node.js-20-green) ![Docker](https://img.shields.io/badge/Docker-Compose-blue) ![SQLite](https://img.shields.io/badge/DB-SQLite-lightgrey) ![License](https://img.shields.io/badge/License-MIT-yellow) ![Version](https://img.shields.io/badge/version-1.4.4-cyan)
+![Stack](https://img.shields.io/badge/Node.js-20-green) ![Docker](https://img.shields.io/badge/Docker-Compose-blue) ![SQLite](https://img.shields.io/badge/DB-SQLite-lightgrey) ![License](https://img.shields.io/badge/License-MIT-yellow) ![Version](https://img.shields.io/badge/version-1.5.0-cyan)
 
 ---
 
@@ -11,6 +11,7 @@
 - 🖥️ Управление несколькими нодами из одного интерфейса
 - ➕ Добавление нод через веб — SSH пароль или ключ
 - 👥 Создание юзеров с уникальной ссылкой `tg://proxy`
+- 🔄 **Синхронизация юзеров** — импорт существующих юзеров с ноды в панель одной кнопкой
 - 📱 QR-код для каждого юзера — открой и отсканируй прямо в панели
 - 📊 Трафик входящий/исходящий по каждому юзеру
 - 📈 График подключений за последние 24 часа
