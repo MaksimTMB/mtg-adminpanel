@@ -1,1 +1,5 @@
-﻿{"name":"mtg-adminpanel","version":"1.6.0"}
+{
+  "name": "mtg-adminpanel",
+  "version": "1.6.0",
+  "description": "MTG Proxy AdminPanel"
+}
