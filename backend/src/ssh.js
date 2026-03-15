@@ -6,14 +6,23 @@ const AGENT_TOKEN = process.env.AGENT_TOKEN || 'mtg-agent-secret';
 // ── Agent HTTP client ─────────────────────────────────────
 function agentFetch(host, port, path) {
   return new Promise((resolve, reject) => {
-    const { exec } = require('child_process');
-    const url = `http://${host}:${port}${path}`;
-    const cmd = `wget -q -4 -O- --timeout=3 --header="x-agent-token: ${AGENT_TOKEN}" "${url}"`;
-    exec(cmd, { timeout: 5000 }, (err, stdout) => {
-      if (err) return reject(new Error('Agent unreachable'));
-      try { resolve(JSON.parse(stdout)); }
-      catch { reject(new Error('Invalid JSON from agent')); }
+    const req = http.request({
+      hostname: host,
+      port: parseInt(port),
+      path,
+      method: 'GET',
+      headers: { 'x-agent-token': AGENT_TOKEN },
+    }, res => {
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch { reject(new Error('Invalid JSON from agent')); }
+      });
     });
+    req.setTimeout(10000, () => { req.destroy(); reject(new Error('Agent timeout')); });
+    req.on('error', reject);
+    req.end();
   });
 }
 
