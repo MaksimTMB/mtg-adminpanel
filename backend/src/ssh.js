@@ -1,5 +1,47 @@
 const { Client } = require('ssh2');
+const http = require('http');
 
+// ── Agent HTTP client ─────────────────────────────────────
+// If node has agent_port configured, use HTTP agent instead of SSH exec
+// for getNodeStatus, getRemoteUsers, getTraffic
+
+const AGENT_PORT = parseInt(process.env.AGENT_PORT || '8081');
+const AGENT_TOKEN = process.env.AGENT_TOKEN || 'mtg-agent-secret';
+
+function agentFetch(host, path) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: host,
+      port: AGENT_PORT,
+      path,
+      method: 'GET',
+      headers: { 'x-agent-token': AGENT_TOKEN },
+      timeout: 3000,
+    };
+    const req = http.request(options, res => {
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch { reject(new Error('Invalid JSON from agent')); }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Agent timeout')); });
+    req.end();
+  });
+}
+
+async function getAgentMetrics(node) {
+  try {
+    const data = await agentFetch(node.host, '/metrics');
+    return data.containers || null;
+  } catch {
+    return null; // Agent unavailable — fall back to SSH
+  }
+}
+
+// ── SSH exec ──────────────────────────────────────────────
 function sshExec(node, command) {
   return new Promise((resolve, reject) => {
     const conn = new Client();
@@ -19,16 +61,14 @@ function sshExec(node, command) {
       config.password = node.ssh_password;
     }
 
-    const wrappedCommand = command;
-
     conn.on('ready', () => {
-      conn.exec(wrappedCommand, (err, stream) => {
+      conn.exec(command, (err, stream) => {
         if (err) { conn.end(); return reject(err); }
         stream.on('data', d => { output += d.toString(); });
         stream.stderr.on('data', d => { errOutput += d.toString(); });
-        stream.on('close', (code) => {
+        stream.on('close', () => {
           conn.end();
-          resolve({ output: output.trim(), error: errOutput.trim(), code });
+          resolve({ output: output.trim(), error: errOutput.trim() });
         });
       });
     });
@@ -39,6 +79,12 @@ function sshExec(node, command) {
 }
 
 async function checkNode(node) {
+  // First try agent health check (fast)
+  try {
+    const data = await agentFetch(node.host, '/health');
+    if (data.status === 'ok') return true;
+  } catch {}
+  // Fallback: SSH
   try {
     const r = await sshExec(node, 'echo ok');
     return r.output === 'ok';
@@ -48,8 +94,16 @@ async function checkNode(node) {
 }
 
 async function getNodeStatus(node) {
+  // Try agent first
+  const containers = await getAgentMetrics(node);
+  if (containers !== null) {
+    const running = containers.filter(c => c.running).length;
+    return { online: running > 0 || containers.length >= 0, containers: running, via_agent: true };
+  }
+
+  // Fallback: SSH
   try {
-    const r = await sshExec(node, "COUNT=$(docker ps --filter 'name=mtg-' --format '{{.Names}}' 2>/dev/null | wc -l); echo \"ONLINE|$COUNT\"");
+    const r = await sshExec(node, "COUNT=$(docker ps --filter 'name=mtg-' --format '{{.Names}}' 2>/dev/null | grep -v mtg-agent | wc -l); echo \"ONLINE|$COUNT\"");
     if (r.output.startsWith('ONLINE|')) {
       const count = parseInt(r.output.split('|')[1]) || 0;
       return { online: true, containers: count };
@@ -61,6 +115,20 @@ async function getNodeStatus(node) {
 }
 
 async function getRemoteUsers(node) {
+  // Try agent first
+  const containers = await getAgentMetrics(node);
+  if (containers !== null) {
+    return containers.map(c => ({
+      name:        c.name.replace('mtg-', ''),
+      port:        null, // not available from agent, comes from DB
+      secret:      null, // not available from agent, comes from DB
+      status:      c.running ? 'Up' : 'stopped',
+      connections: c.connections || 0,
+      via_agent:   true,
+    }));
+  }
+
+  // Fallback: SSH
   try {
     const cmd = [
       'BASE=' + node.base_dir,
@@ -70,7 +138,7 @@ async function getRemoteUsers(node) {
       "  SECRET=$(grep secret \"$DIR/config.toml\" 2>/dev/null | awk -F'\"' '{print $2}')",
       "  PORT=$(grep -o '[0-9]*:3128' \"$DIR/docker-compose.yml\" 2>/dev/null | cut -d: -f1)",
       "  STATUS=$(docker ps --filter \"name=mtg-$NAME\" --format '{{.Status}}' 2>/dev/null)",
-      '  CONNS=$(docker exec mtg-$NAME cat /proc/net/tcp 2>/dev/null | grep -v local | wc -l || echo 0)',
+      '  CONNS=$(docker exec mtg-$NAME sh -c "cat /proc/net/tcp | awk \'NR>1 && $4==\"01\"{c++} END{print c+0}\'" 2>/dev/null || echo 0)',
       '  echo "USER|$NAME|$PORT|$SECRET|${STATUS:-stopped}|$CONNS"',
       'done'
     ].join('\n');
@@ -90,21 +158,32 @@ async function getRemoteUsers(node) {
 }
 
 async function getTraffic(node) {
+  // Try agent first
+  const containers = await getAgentMetrics(node);
+  if (containers !== null) {
+    const result = {};
+    for (const c of containers) {
+      const userName = c.name.replace('mtg-', '');
+      result[userName] = {
+        rx: c.traffic?.rx || '0B',
+        tx: c.traffic?.tx || '0B',
+      };
+    }
+    return result;
+  }
+
+  // Fallback: SSH docker stats
   try {
     const r = await sshExec(node,
-      "docker stats --no-stream --format '{{.Name}}|{{.NetIO}}' 2>/dev/null | grep '^mtg-'"
+      "docker stats --no-stream --format '{{.Name}}|{{.NetIO}}' 2>/dev/null | grep '^mtg-' | grep -v 'mtg-agent'"
     );
     const result = {};
     for (const line of r.output.split('\n')) {
       if (!line.includes('|')) continue;
       const [name, netio] = line.split('|');
       const userName = name.replace('mtg-', '').trim();
-      // NetIO format: "1.23MB / 4.56GB"
       const parts = netio.trim().split(' / ');
-      result[userName] = {
-        rx: parts[0] || '0B',
-        tx: parts[1] || '0B'
-      };
+      result[userName] = { rx: parts[0] || '0B', tx: parts[1] || '0B' };
     }
     return result;
   } catch {
@@ -126,18 +205,16 @@ async function createRemoteUser(node, name) {
     'PORT=$((START_PORT + PORT))',
     "SECRET=\"ee$(openssl rand -hex 16)$(echo -n 'google.com' | xxd -p)\"",
     'mkdir -p "$USER_DIR"',
-    'printf \'secret = "%s"\\nbind-to = "0.0.0.0:3128"\\n\' "$SECRET" > "$USER_DIR/config.toml"',
-    'printf \'services:\\n  mtg-%s:\\n    image: nineseconds/mtg:2\\n    container_name: mtg-%s\\n    restart: unless-stopped\\n    ports:\\n      - "%s:3128"\\n    volumes:\\n      - %s/config.toml:/config.toml:ro\\n    command: run /config.toml\\n\' "$NAME" "$NAME" "$PORT" "$USER_DIR" > "$USER_DIR/docker-compose.yml"',
+    'printf \'secret = "%s"\nbind-to = "0.0.0.0:3128"\n\' "$SECRET" > "$USER_DIR/config.toml"',
+    'printf \'services:\n  mtg-%s:\n    image: nineseconds/mtg:2\n    container_name: mtg-%s\n    restart: unless-stopped\n    ports:\n      - "%s:3128"\n    volumes:\n      - %s/config.toml:/config.toml:ro\n    command: run /config.toml\n\' "$NAME" "$NAME" "$PORT" "$USER_DIR" > "$USER_DIR/docker-compose.yml"',
     'cd "$USER_DIR" && docker compose up -d 2>&1',
     'echo "OK|$NAME|$PORT|$SECRET"'
   ].join('\n');
 
   const r = await sshExec(node, cmd);
-
   if (r.output.includes('EXISTS')) throw new Error('User already exists on node');
   const okLine = r.output.split('\n').find(l => l.startsWith('OK|'));
   if (!okLine) throw new Error('Failed to create user: ' + r.output);
-
   const parts = okLine.split('|');
   return { port: parseInt(parts[2]), secret: parts[3] };
 }

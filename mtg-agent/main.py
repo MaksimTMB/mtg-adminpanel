@@ -20,7 +20,7 @@ client = docker.from_env()
 def get_mtg_containers():
     """Получить все MTG контейнеры (имя начинается с mtg-)"""
     try:
-        return [c for c in client.containers.list(all=True) if c.name.startswith("mtg-")]
+        return [c for c in client.containers.list(all=True) if c.name.startswith("mtg-") and c.name != "mtg-agent"]
     except Exception:
         return []
 
