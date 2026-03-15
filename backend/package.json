@@ -1,6 +1,6 @@
 {
   "name": "mtg-panel-backend",
-  "version": "1.6.0",
+  "version": "2.0.0",
   "main": "src/app.js",
   "scripts": {
     "start": "node src/app.js",
