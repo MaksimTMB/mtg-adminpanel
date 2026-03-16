@@ -1,8 +1,9 @@
+import io
 import json
 import os
+import shlex
 import socket
 import sqlite3
-import io
 import urllib.error
 import urllib.request
 from contextlib import closing
@@ -10,8 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
 
-import pyotp
 import paramiko
+import pyotp
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,7 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-APP_VERSION = "0.2.0-mtg-test"
+APP_VERSION = "0.3.0-mtg-test"
 AUTH_TOKEN = os.getenv("AUTH_TOKEN", "changeme")
 AGENT_TOKEN = os.getenv("AGENT_TOKEN", "mtg-agent-secret")
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
@@ -35,7 +36,7 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
-def add_column_if_missing(conn: sqlite3.Connection, table: str, col_sql: str, col_name: str) -> None:
+def add_column_if_missing(conn: sqlite3.Connection, table: str, col_sql: str) -> None:
     try:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_sql}")
     except sqlite3.OperationalError:
@@ -82,6 +83,11 @@ def init_db() -> None:
               traffic_tx_snap TEXT DEFAULT NULL,
               traffic_reset_at DATETIME DEFAULT NULL,
               last_seen_at DATETIME DEFAULT NULL,
+              billing_price REAL DEFAULT NULL,
+              billing_currency TEXT DEFAULT 'RUB',
+              billing_period TEXT DEFAULT 'monthly',
+              billing_paid_until DATETIME DEFAULT NULL,
+              billing_status TEXT DEFAULT 'active',
               FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
             );
 
@@ -91,17 +97,25 @@ def init_db() -> None:
             );
             """
         )
-        add_column_if_missing(conn, "nodes", "flag TEXT DEFAULT NULL", "flag")
-        add_column_if_missing(conn, "nodes", "agent_port INTEGER DEFAULT NULL", "agent_port")
-        add_column_if_missing(conn, "users", "max_devices INTEGER DEFAULT NULL", "max_devices")
-        add_column_if_missing(conn, "users", "traffic_reset_interval TEXT DEFAULT NULL", "traffic_reset_interval")
-        add_column_if_missing(conn, "users", "next_reset_at DATETIME DEFAULT NULL", "next_reset_at")
-        add_column_if_missing(conn, "users", "total_traffic_rx_bytes INTEGER DEFAULT 0", "total_traffic_rx_bytes")
-        add_column_if_missing(conn, "users", "total_traffic_tx_bytes INTEGER DEFAULT 0", "total_traffic_tx_bytes")
-        add_column_if_missing(conn, "users", "traffic_rx_snap TEXT DEFAULT NULL", "traffic_rx_snap")
-        add_column_if_missing(conn, "users", "traffic_tx_snap TEXT DEFAULT NULL", "traffic_tx_snap")
-        add_column_if_missing(conn, "users", "traffic_reset_at DATETIME DEFAULT NULL", "traffic_reset_at")
-        add_column_if_missing(conn, "users", "last_seen_at DATETIME DEFAULT NULL", "last_seen_at")
+        add_column_if_missing(conn, "nodes", "flag TEXT DEFAULT NULL")
+        add_column_if_missing(conn, "nodes", "agent_port INTEGER DEFAULT NULL")
+        for col in [
+            "max_devices INTEGER DEFAULT NULL",
+            "traffic_reset_interval TEXT DEFAULT NULL",
+            "next_reset_at DATETIME DEFAULT NULL",
+            "total_traffic_rx_bytes INTEGER DEFAULT 0",
+            "total_traffic_tx_bytes INTEGER DEFAULT 0",
+            "traffic_rx_snap TEXT DEFAULT NULL",
+            "traffic_tx_snap TEXT DEFAULT NULL",
+            "traffic_reset_at DATETIME DEFAULT NULL",
+            "last_seen_at DATETIME DEFAULT NULL",
+            "billing_price REAL DEFAULT NULL",
+            "billing_currency TEXT DEFAULT 'RUB'",
+            "billing_period TEXT DEFAULT 'monthly'",
+            "billing_paid_until DATETIME DEFAULT NULL",
+            "billing_status TEXT DEFAULT 'active'",
+        ]:
+            add_column_if_missing(conn, "users", col)
 
 
 def row_to_dict(row: sqlite3.Row) -> dict:
@@ -123,8 +137,6 @@ class NodeIn(BaseModel):
 
 class UserIn(BaseModel):
     name: str
-    port: int
-    secret: str
     note: str = ""
     expires_at: Optional[str] = None
     traffic_limit_gb: Optional[float] = None
@@ -136,6 +148,11 @@ class UserUpdateIn(BaseModel):
     traffic_limit_gb: Optional[float] = None
     max_devices: Optional[int] = None
     traffic_reset_interval: Optional[str] = None
+    billing_price: Optional[float] = None
+    billing_currency: Optional[str] = None
+    billing_period: Optional[str] = None
+    billing_paid_until: Optional[str] = None
+    billing_status: Optional[str] = None
 
 
 class TotpVerifyIn(BaseModel):
@@ -162,13 +179,14 @@ def set_setting(key: str, value: str) -> None:
 
 
 def fetch_agent_metrics(node: sqlite3.Row) -> Dict[str, dict]:
-    port = node["agent_port"]
-    if not port:
+    if not node["agent_port"]:
         return {}
-    url = f"http://{node['host']}:{port}/metrics"
-    req = urllib.request.Request(url, headers={"x-agent-token": AGENT_TOKEN})
+    req = urllib.request.Request(
+        f"http://{node['host']}:{node['agent_port']}/metrics",
+        headers={"x-agent-token": AGENT_TOKEN},
+    )
     try:
-        with urllib.request.urlopen(req, timeout=4) as resp:
+        with urllib.request.urlopen(req, timeout=5) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
         return {}
@@ -191,10 +209,10 @@ def fetch_agent_metrics(node: sqlite3.Row) -> Dict[str, dict]:
     return out
 
 
-def ssh_exec(node: sqlite3.Row, command: str) -> str:
+def ssh_exec(node: sqlite3.Row, command: str, timeout: int = 20) -> str:
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    kwargs = {
+    cfg = {
         "hostname": node["host"],
         "port": int(node["ssh_port"] or 22),
         "username": node["ssh_user"] or "root",
@@ -202,25 +220,23 @@ def ssh_exec(node: sqlite3.Row, command: str) -> str:
         "banner_timeout": 8,
         "auth_timeout": 8,
     }
-    ssh_key = node["ssh_key"]
-    ssh_password = node["ssh_password"]
-    if ssh_key:
+    if node["ssh_key"]:
         pkey = None
-        for key_cls in (paramiko.RSAKey, paramiko.Ed25519Key, paramiko.ECDSAKey):
+        for cls in (paramiko.RSAKey, paramiko.Ed25519Key, paramiko.ECDSAKey):
             try:
-                pkey = key_cls.from_private_key(io.StringIO(ssh_key))
+                pkey = cls.from_private_key(io.StringIO(node["ssh_key"]))
                 break
             except Exception:
                 continue
         if not pkey:
-            raise RuntimeError("invalid ssh key")
-        kwargs["pkey"] = pkey
-    elif ssh_password:
-        kwargs["password"] = ssh_password
+            raise RuntimeError("Invalid SSH key")
+        cfg["pkey"] = pkey
+    elif node["ssh_password"]:
+        cfg["password"] = node["ssh_password"]
 
-    client.connect(**kwargs)
+    client.connect(**cfg)
     try:
-        _, stdout, stderr = client.exec_command(command, timeout=15)
+        _, stdout, stderr = client.exec_command(command, timeout=timeout)
         out = stdout.read().decode("utf-8", errors="ignore").strip()
         err = stderr.read().decode("utf-8", errors="ignore").strip()
         if err and not out:
@@ -230,9 +246,9 @@ def ssh_exec(node: sqlite3.Row, command: str) -> str:
         client.close()
 
 
-def get_remote_users(node: sqlite3.Row):
+def get_remote_users(node: sqlite3.Row) -> list[dict]:
     cmd = "\n".join([
-        f"BASE={node['base_dir'] or '/opt/mtg/users'}",
+        f"BASE={shlex.quote(node['base_dir'] or '/opt/mtg/users')}",
         "for DIR in $BASE/*/; do",
         "  [ -d \"$DIR\" ] || continue",
         "  NAME=$(basename \"$DIR\")",
@@ -247,6 +263,7 @@ def get_remote_users(node: sqlite3.Row):
         out = ssh_exec(node, cmd)
     except Exception:
         return []
+
     users = []
     for line in out.splitlines():
         if not line.startswith("USER|"):
@@ -254,51 +271,109 @@ def get_remote_users(node: sqlite3.Row):
         _, name, port, secret, status, conns = line.split("|", 5)
         users.append({
             "name": name,
-            "port": int(port) if str(port).isdigit() else None,
+            "port": int(port) if port.isdigit() else None,
             "secret": secret or None,
             "status": status or "stopped",
-            "connections": int(conns) if str(conns).isdigit() else 0,
+            "connections": int(conns) if conns.isdigit() else 0,
         })
     return users
 
 
-def get_remote_traffic(node: sqlite3.Row):
+def get_remote_traffic(node: sqlite3.Row) -> dict:
     cmd = "docker stats --no-stream --format '{{.Name}}|{{.NetIO}}' 2>/dev/null | grep '^mtg-' | grep -v 'mtg-agent'"
     try:
         out = ssh_exec(node, cmd)
     except Exception:
         return {}
+
     result = {}
     for line in out.splitlines():
         if "|" not in line:
             continue
         name, netio = line.split("|", 1)
-        user_name = name.replace("mtg-", "").strip()
+        user = name.replace("mtg-", "").strip()
         parts = [p.strip() for p in netio.split("/")]
-        result[user_name] = {"rx": parts[0] if parts else "0B", "tx": parts[1] if len(parts) > 1 else "0B"}
+        result[user] = {"rx": parts[0] if parts else "0B", "tx": parts[1] if len(parts) > 1 else "0B"}
     return result
+
+
+def create_remote_user(node: sqlite3.Row, user_name: str) -> tuple[int, str]:
+    safe_name = shlex.quote(user_name)
+    base = shlex.quote(node["base_dir"] or "/opt/mtg/users")
+    start_port = int(node["start_port"] or 4433)
+    cmd = "\n".join([
+        f"BASE={base}",
+        f"NAME={safe_name}",
+        f"START_PORT={start_port}",
+        "USER_DIR=\"$BASE/$NAME\"",
+        "if [ -d \"$USER_DIR\" ]; then echo EXISTS; exit 1; fi",
+        "COUNT=$(ls -1 $BASE 2>/dev/null | wc -l)",
+        "PORT=$((START_PORT + COUNT))",
+        "SECRET=\"ee$(openssl rand -hex 16)$(echo -n 'google.com' | xxd -p)\"",
+        "mkdir -p \"$USER_DIR\"",
+        "printf 'secret = \"%s\"\\nbind-to = \"0.0.0.0:3128\"\\n' \"$SECRET\" > \"$USER_DIR/config.toml\"",
+        "printf 'services:\n  mtg-%s:\n    image: nineseconds/mtg:2\n    container_name: mtg-%s\n    restart: unless-stopped\n    ports:\n      - \"%s:3128\"\n    volumes:\n      - %s/config.toml:/config.toml:ro\n    command: run /config.toml\n' \"$NAME\" \"$NAME\" \"$PORT\" \"$USER_DIR\" > \"$USER_DIR/docker-compose.yml\"",
+        "cd \"$USER_DIR\" && docker compose up -d 2>&1",
+        "echo \"OK|$PORT|$SECRET\"",
+    ])
+    out = ssh_exec(node, cmd, timeout=40)
+    if "EXISTS" in out:
+        raise RuntimeError("User already exists on node")
+    ok_line = next((l for l in out.splitlines() if l.startswith("OK|")), None)
+    if not ok_line:
+        raise RuntimeError(f"Create user failed: {out}")
+    _, port, secret = ok_line.split("|", 2)
+    return int(port), secret
+
+
+def remove_remote_user(node: sqlite3.Row, user_name: str) -> None:
+    name = shlex.quote(user_name)
+    base = shlex.quote(node["base_dir"] or "/opt/mtg/users")
+    cmd = f'BASE={base}; NAME={name}; USER_DIR="$BASE/$NAME"; if [ -d "$USER_DIR" ]; then cd "$USER_DIR" && docker compose down 2>/dev/null; rm -rf "$USER_DIR"; fi; echo DONE'
+    ssh_exec(node, cmd)
+
+
+def stop_remote_user(node: sqlite3.Row, user_name: str) -> None:
+    path = shlex.quote(f"{node['base_dir'] or '/opt/mtg/users'}/{user_name}")
+    ssh_exec(node, f"cd {path} && docker compose stop 2>/dev/null")
+
+
+def start_remote_user(node: sqlite3.Row, user_name: str) -> None:
+    path = shlex.quote(f"{node['base_dir'] or '/opt/mtg/users'}/{user_name}")
+    ssh_exec(node, f"cd {path} && docker compose start 2>/dev/null")
 
 
 def iso_now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-init_db()
+def calc_next_reset(interval: Optional[str]) -> Optional[str]:
+    if not interval:
+        return None
+    now = datetime.now()
+    if interval == "daily":
+        n = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        n = n.replace(day=now.day)  # no-op for readability
+        n = n.fromtimestamp(n.timestamp() + 86400)
+    elif interval == "monthly":
+        y = now.year + (1 if now.month == 12 else 0)
+        m = 1 if now.month == 12 else now.month + 1
+        n = now.replace(year=y, month=m, day=1, hour=0, minute=0, second=0, microsecond=0)
+    elif interval == "yearly":
+        n = now.replace(year=now.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    else:
+        return None
+    return n.strftime("%Y-%m-%d %H:%M:%S")
 
+
+init_db()
 app = FastAPI(title="MTG Control API (test)", version=APP_VERSION)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(_: Request, exc: HTTPException):
-    msg = exc.detail if isinstance(exc.detail, str) else "API error"
-    return JSONResponse(status_code=exc.status_code, content={"error": msg})
+    return JSONResponse(status_code=exc.status_code, content={"error": exc.detail if isinstance(exc.detail, str) else "API error"})
 
 
 @app.exception_handler(RequestValidationError)
@@ -320,9 +395,7 @@ def version():
 @app.get("/api/nodes", dependencies=[Depends(require_auth)])
 def list_nodes():
     with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT id, name, host, ssh_user, ssh_port, base_dir, start_port, created_at, flag, agent_port FROM nodes"
-        ).fetchall()
+        rows = conn.execute("SELECT id, name, host, ssh_user, ssh_port, base_dir, start_port, created_at, flag, agent_port FROM nodes").fetchall()
         return [row_to_dict(r) for r in rows]
 
 
@@ -330,22 +403,8 @@ def list_nodes():
 def create_node(payload: NodeIn):
     with get_conn() as conn:
         cur = conn.execute(
-            """
-            INSERT INTO nodes (name, host, ssh_user, ssh_port, ssh_key, ssh_password, base_dir, start_port, flag, agent_port)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                payload.name,
-                payload.host,
-                payload.ssh_user,
-                payload.ssh_port,
-                payload.ssh_key,
-                payload.ssh_password,
-                payload.base_dir,
-                payload.start_port,
-                payload.flag,
-                payload.agent_port,
-            ),
+            "INSERT INTO nodes (name, host, ssh_user, ssh_port, ssh_key, ssh_password, base_dir, start_port, flag, agent_port) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (payload.name, payload.host, payload.ssh_user, payload.ssh_port, payload.ssh_key, payload.ssh_password, payload.base_dir, payload.start_port, payload.flag, payload.agent_port),
         )
         return {"ok": True, "id": cur.lastrowid}
 
@@ -353,37 +412,20 @@ def create_node(payload: NodeIn):
 @app.put("/api/nodes/{node_id}", dependencies=[Depends(require_auth)])
 def update_node(node_id: int, payload: NodeIn):
     with get_conn() as conn:
-        exists = conn.execute("SELECT id FROM nodes WHERE id=?", (node_id,)).fetchone()
-        if not exists:
+        if not conn.execute("SELECT id FROM nodes WHERE id=?", (node_id,)).fetchone():
             raise HTTPException(status_code=404, detail="Node not found")
         conn.execute(
-            """
-            UPDATE nodes
-            SET name=?, host=?, ssh_user=?, ssh_port=?, ssh_key=?, ssh_password=?, base_dir=?, start_port=?, flag=?, agent_port=?
-            WHERE id=?
-            """,
-            (
-                payload.name,
-                payload.host,
-                payload.ssh_user,
-                payload.ssh_port,
-                payload.ssh_key,
-                payload.ssh_password,
-                payload.base_dir,
-                payload.start_port,
-                payload.flag,
-                payload.agent_port,
-                node_id,
-            ),
+            "UPDATE nodes SET name=?, host=?, ssh_user=?, ssh_port=?, ssh_key=?, ssh_password=?, base_dir=?, start_port=?, flag=?, agent_port=? WHERE id=?",
+            (payload.name, payload.host, payload.ssh_user, payload.ssh_port, payload.ssh_key, payload.ssh_password, payload.base_dir, payload.start_port, payload.flag, payload.agent_port, node_id),
         )
-        return {"ok": True}
+    return {"ok": True}
 
 
 @app.delete("/api/nodes/{node_id}", dependencies=[Depends(require_auth)])
 def delete_node(node_id: int):
     with get_conn() as conn:
         conn.execute("DELETE FROM nodes WHERE id=?", (node_id,))
-        return {"ok": True}
+    return {"ok": True}
 
 
 @app.get("/api/nodes/{node_id}/check-agent", dependencies=[Depends(require_auth)])
@@ -392,34 +434,44 @@ def check_agent(node_id: int):
         node = conn.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
         if not node:
             raise HTTPException(status_code=404, detail="Node not found")
-    metrics = fetch_agent_metrics(node)
-    return {"available": bool(node["agent_port"]) and (len(metrics) > 0)}
+    return {"available": bool(fetch_agent_metrics(node))}
 
 
 @app.post("/api/nodes/{node_id}/update-agent", dependencies=[Depends(require_auth)])
 def update_agent(node_id: int):
     with get_conn() as conn:
-        node = conn.execute("SELECT id FROM nodes WHERE id=?", (node_id,)).fetchone()
+        node = conn.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
         if not node:
             raise HTTPException(status_code=404, detail="Node not found")
-    return {"ok": False, "error": "FastAPI test backend: update-agent через SSH пока не реализован"}
+    try:
+        token = AGENT_TOKEN
+        raw = "https://raw.githubusercontent.com/MaksimTMB/mtg-adminpanel/dev/mtg-agent"
+        cmd = " && ".join([
+            "mkdir -p /opt/mtg-agent && cd /opt/mtg-agent",
+            f"wget -q '{raw}/main.py' -O main.py",
+            f"wget -q '{raw}/docker-compose.yml' -O docker-compose.yml",
+            f"echo 'AGENT_TOKEN={token}' > .env",
+            "docker compose down 2>/dev/null || true",
+            "docker compose up -d",
+            "echo DONE",
+        ])
+        out = ssh_exec(node, cmd, timeout=60)
+        return {"ok": "DONE" in out, "output": out[-800:]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/nodes/{node_id}/check", dependencies=[Depends(require_auth)])
 def check_node(node_id: int):
     with get_conn() as conn:
-        node = conn.execute("SELECT host, ssh_port FROM nodes WHERE id=?", (node_id,)).fetchone()
+        node = conn.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
         if not node:
             raise HTTPException(status_code=404, detail="Node not found")
-    host, port = node["host"], int(node["ssh_port"] or 22)
-    online = False
-    error = None
     try:
-        with closing(socket.create_connection((host, port), timeout=2.0)):
-            online = True
-    except OSError as exc:
-        error = str(exc)
-    return {"online": online, "error": error}
+        ssh_exec(node, "echo ok", timeout=8)
+        return {"online": True}
+    except Exception as e:
+        return {"online": False, "error": str(e)}
 
 
 @app.get("/api/nodes/{node_id}/traffic", dependencies=[Depends(require_auth)])
@@ -429,18 +481,17 @@ def node_traffic(node_id: int):
         if not node:
             raise HTTPException(status_code=404, detail="Node not found")
         users = conn.execute("SELECT name, traffic_rx_snap, traffic_tx_snap FROM users WHERE node_id=?", (node_id,)).fetchall()
-
     metrics = fetch_agent_metrics(node)
     ssh_traffic = get_remote_traffic(node) if not metrics else {}
     out = {}
     for u in users:
-        m = metrics.get(u["name"])
-        if m:
-            out[u["name"]] = m.get("traffic", {"rx": "—", "tx": "—", "rx_bytes": 0, "tx_bytes": 0})
-        elif u["name"] in ssh_traffic:
-            out[u["name"]] = {"rx": ssh_traffic[u["name"]].get("rx", "0B"), "tx": ssh_traffic[u["name"]].get("tx", "0B"), "rx_bytes": 0, "tx_bytes": 0}
+        name = u["name"]
+        if metrics.get(name):
+            out[name] = metrics[name].get("traffic", {"rx": "—", "tx": "—", "rx_bytes": 0, "tx_bytes": 0})
+        elif name in ssh_traffic:
+            out[name] = {"rx": ssh_traffic[name].get("rx", "0B"), "tx": ssh_traffic[name].get("tx", "0B"), "rx_bytes": 0, "tx_bytes": 0}
         elif u["traffic_rx_snap"] or u["traffic_tx_snap"]:
-            out[u["name"]] = {"rx": u["traffic_rx_snap"] or "—", "tx": u["traffic_tx_snap"] or "—", "rx_bytes": 0, "tx_bytes": 0}
+            out[name] = {"rx": u["traffic_rx_snap"] or "—", "tx": u["traffic_tx_snap"] or "—", "rx_bytes": 0, "tx_bytes": 0}
     return out
 
 
@@ -450,79 +501,83 @@ def list_node_users(node_id: int):
         node = conn.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
         if not node:
             raise HTTPException(status_code=404, detail="Node not found")
-        users = conn.execute("SELECT * FROM users WHERE node_id=?", (node_id,)).fetchall()
+        db_users = conn.execute("SELECT * FROM users WHERE node_id=?", (node_id,)).fetchall()
 
     metrics = fetch_agent_metrics(node)
-    remote_users = get_remote_users(node) if not metrics else []
-    remote_by_name = {u["name"]: u for u in remote_users}
-    result = []
-    for u in users:
-        item = row_to_dict(u)
-        expires = item.get("expires_at")
-        expired = False
-        if expires:
-            try:
-                expired = datetime.fromisoformat(expires.replace(" ", "T")) < datetime.now()
-            except ValueError:
-                expired = False
+    remote = get_remote_users(node) if not metrics else []
+    remote_by_name = {u["name"]: u for u in remote}
 
-        m = metrics.get(item["name"], {})
-        r = remote_by_name.get(item["name"], {})
+    result = []
+    for row in db_users:
+        u = row_to_dict(row)
+        r = remote_by_name.get(u["name"], {})
+        m = metrics.get(u["name"], {})
         running = m.get("running")
         if running is None:
-            running = not str(r.get("status", "")).lower().startswith("stopped") if r else (item.get("status") != "stopped")
+            running = not str(r.get("status", "")).lower().startswith("stopped") if r else (u.get("status") != "stopped")
         connections = int(m.get("connections", r.get("connections", 0) or 0))
-        is_online = bool(m.get("is_online", connections > 0))
-
-        if is_online:
-            item["last_seen_at"] = iso_now()
-
-        traffic = m.get("traffic")
-        if traffic:
-            item["traffic_rx_snap"] = traffic.get("rx")
-            item["traffic_tx_snap"] = traffic.get("tx")
-            item["total_traffic_rx_bytes"] = int(item.get("total_traffic_rx_bytes") or 0) + int(traffic.get("rx_bytes", 0) or 0)
-            item["total_traffic_tx_bytes"] = int(item.get("total_traffic_tx_bytes") or 0) + int(traffic.get("tx_bytes", 0) or 0)
-
-        item.update(
+        u.update(
             {
                 "running": running,
                 "status": "active" if running else "stopped",
                 "connections": connections,
-                "is_online": is_online,
-                "expired": expired,
-                "port": item.get("port") or r.get("port"),
-                "secret": item.get("secret") or r.get("secret"),
-                "link": f"tg://proxy?server={node['host']}&port={item.get('port') or r.get('port') or ''}&secret={item.get('secret') or r.get('secret') or ''}",
+                "is_online": bool(m.get("is_online", connections > 0)),
+                "port": u.get("port") or r.get("port"),
+                "secret": u.get("secret") or r.get("secret"),
+                "expired": bool(u.get("expires_at") and datetime.fromisoformat(str(u["expires_at"]).replace(" ", "T")) < datetime.now()),
             }
         )
-        result.append(item)
+        u["link"] = f"tg://proxy?server={node['host']}&port={u.get('port') or ''}&secret={u.get('secret') or ''}"
+        result.append(u)
 
+    if node["agent_port"] and metrics:
+        with get_conn() as conn:
+            for u in result:
+                if u.get("is_online"):
+                    conn.execute("UPDATE users SET last_seen_at=datetime('now') WHERE node_id=? AND name=?", (node_id, u["name"]))
     return result
+
+
+@app.post("/api/nodes/{node_id}/sync", dependencies=[Depends(require_auth)])
+def sync_node(node_id: int):
+    with get_conn() as conn:
+        node = conn.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
+        if not node:
+            raise HTTPException(status_code=404, detail="Node not found")
+    remote_users = get_remote_users(node)
+    imported = 0
+    with get_conn() as conn:
+        for ru in remote_users:
+            exists = conn.execute("SELECT id FROM users WHERE node_id=? AND name=?", (node_id, ru["name"])).fetchone()
+            if exists:
+                continue
+            conn.execute(
+                "INSERT INTO users (node_id, name, port, secret, note, expires_at, traffic_limit_gb, status) VALUES (?, ?, ?, ?, '', NULL, NULL, ?)",
+                (node_id, ru["name"], ru.get("port") or 0, ru.get("secret") or "", "active" if not str(ru.get("status", "")).lower().startswith("stopped") else "stopped"),
+            )
+            imported += 1
+    return {"ok": True, "imported": imported, "total": len(remote_users)}
 
 
 @app.post("/api/nodes/{node_id}/users", dependencies=[Depends(require_auth)])
 def create_node_user(node_id: int, payload: UserIn):
     with get_conn() as conn:
-        node = conn.execute("SELECT id FROM nodes WHERE id=?", (node_id,)).fetchone()
+        node = conn.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
         if not node:
             raise HTTPException(status_code=404, detail="Node not found")
+        if conn.execute("SELECT id FROM users WHERE node_id=? AND name=?", (node_id, payload.name)).fetchone():
+            raise HTTPException(status_code=400, detail="User already exists")
+    try:
+        port, secret = create_remote_user(node, payload.name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    with get_conn() as conn:
         cur = conn.execute(
-            """
-            INSERT INTO users (node_id, name, port, secret, note, expires_at, traffic_limit_gb, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'active')
-            """,
-            (
-                node_id,
-                payload.name,
-                payload.port,
-                payload.secret,
-                payload.note,
-                payload.expires_at,
-                payload.traffic_limit_gb,
-            ),
+            "INSERT INTO users (node_id, name, port, secret, note, expires_at, traffic_limit_gb, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'active')",
+            (node_id, payload.name, port, secret, payload.note or "", payload.expires_at or None, payload.traffic_limit_gb),
         )
-        return {"ok": True, "id": cur.lastrowid, "name": payload.name, "port": payload.port, "secret": payload.secret}
+    return {"id": cur.lastrowid, "name": payload.name, "port": port, "secret": secret, "note": payload.note or "", "expires_at": payload.expires_at or None, "traffic_limit_gb": payload.traffic_limit_gb, "link": f"tg://proxy?server={node['host']}&port={port}&secret={secret}"}
 
 
 @app.put("/api/nodes/{node_id}/users/{user_name}", dependencies=[Depends(require_auth)])
@@ -531,20 +586,34 @@ def update_node_user(node_id: int, user_name: str, payload: UserUpdateIn):
         user = conn.execute("SELECT * FROM users WHERE node_id=? AND name=?", (node_id, user_name)).fetchone()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
-
-        note = payload.note if payload.note is not None else user["note"]
-        expires_at = payload.expires_at if payload.expires_at is not None else user["expires_at"]
-        traffic_limit_gb = payload.traffic_limit_gb if payload.traffic_limit_gb is not None else user["traffic_limit_gb"]
-        max_devices = payload.max_devices if payload.max_devices is not None else user["max_devices"]
         tri = payload.traffic_reset_interval if payload.traffic_reset_interval is not None else user["traffic_reset_interval"]
+        next_reset = user["next_reset_at"]
+        if payload.traffic_reset_interval is not None and payload.traffic_reset_interval != user["traffic_reset_interval"]:
+            next_reset = calc_next_reset(payload.traffic_reset_interval)
 
         conn.execute(
             """
-            UPDATE users
-            SET note=?, expires_at=?, traffic_limit_gb=?, max_devices=?, traffic_reset_interval=?
+            UPDATE users SET
+              note=?, expires_at=?, traffic_limit_gb=?,
+              max_devices=?, traffic_reset_interval=?, next_reset_at=?,
+              billing_price=?, billing_currency=?, billing_period=?, billing_paid_until=?, billing_status=?
             WHERE node_id=? AND name=?
             """,
-            (note, expires_at, traffic_limit_gb, max_devices, tri, node_id, user_name),
+            (
+                payload.note if payload.note is not None else user["note"],
+                payload.expires_at if payload.expires_at is not None else user["expires_at"],
+                payload.traffic_limit_gb if payload.traffic_limit_gb is not None else user["traffic_limit_gb"],
+                payload.max_devices if payload.max_devices is not None else user["max_devices"],
+                tri,
+                next_reset,
+                payload.billing_price if payload.billing_price is not None else user["billing_price"],
+                payload.billing_currency if payload.billing_currency is not None else (user["billing_currency"] or "RUB"),
+                payload.billing_period if payload.billing_period is not None else (user["billing_period"] or "monthly"),
+                payload.billing_paid_until if payload.billing_paid_until is not None else user["billing_paid_until"],
+                payload.billing_status if payload.billing_status is not None else (user["billing_status"] or "active"),
+                node_id,
+                user_name,
+            ),
         )
     return {"ok": True}
 
@@ -552,57 +621,92 @@ def update_node_user(node_id: int, user_name: str, payload: UserUpdateIn):
 @app.delete("/api/nodes/{node_id}/users/{user_name}", dependencies=[Depends(require_auth)])
 def delete_node_user(node_id: int, user_name: str):
     with get_conn() as conn:
-        conn.execute("DELETE FROM users WHERE node_id=? AND name=?", (node_id, user_name))
-    return {"ok": True}
-
-
-@app.post("/api/nodes/{node_id}/users/{user_name}/start", dependencies=[Depends(require_auth)])
-def start_user(node_id: int, user_name: str):
+        node = conn.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
+        if not node:
+            raise HTTPException(status_code=404, detail="Node not found")
+    try:
+        remove_remote_user(node, user_name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     with get_conn() as conn:
-        conn.execute("UPDATE users SET status='active' WHERE node_id=? AND name=?", (node_id, user_name))
+        conn.execute("DELETE FROM users WHERE node_id=? AND name=?", (node_id, user_name))
     return {"ok": True}
 
 
 @app.post("/api/nodes/{node_id}/users/{user_name}/stop", dependencies=[Depends(require_auth)])
 def stop_user(node_id: int, user_name: str):
     with get_conn() as conn:
+        node = conn.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
+        if not node:
+            raise HTTPException(status_code=404, detail="Node not found")
+    try:
+        traffic = get_remote_traffic(node)
+        if user_name in traffic:
+            with get_conn() as conn:
+                conn.execute("UPDATE users SET traffic_rx_snap=?, traffic_tx_snap=? WHERE node_id=? AND name=?", (traffic[user_name]["rx"], traffic[user_name]["tx"], node_id, user_name))
+        stop_remote_user(node, user_name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    with get_conn() as conn:
         conn.execute("UPDATE users SET status='stopped' WHERE node_id=? AND name=?", (node_id, user_name))
+    return {"ok": True}
+
+
+@app.post("/api/nodes/{node_id}/users/{user_name}/start", dependencies=[Depends(require_auth)])
+def start_user(node_id: int, user_name: str):
+    with get_conn() as conn:
+        node = conn.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
+        if not node:
+            raise HTTPException(status_code=404, detail="Node not found")
+    try:
+        start_remote_user(node, user_name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    with get_conn() as conn:
+        conn.execute("UPDATE users SET status='active' WHERE node_id=? AND name=?", (node_id, user_name))
     return {"ok": True}
 
 
 @app.post("/api/nodes/{node_id}/users/{user_name}/reset-traffic", dependencies=[Depends(require_auth)])
 def reset_traffic(node_id: int, user_name: str):
     with get_conn() as conn:
-        conn.execute(
-            "UPDATE users SET traffic_rx_snap='0B', traffic_tx_snap='0B', traffic_reset_at=? WHERE node_id=? AND name=?",
-            (iso_now(), node_id, user_name),
-        )
-    return {"ok": True}
-
-
-@app.post("/api/nodes/{node_id}/sync", dependencies=[Depends(require_auth)])
-def sync_node(node_id: int):
+        node = conn.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
+        if not node:
+            raise HTTPException(status_code=404, detail="Node not found")
+    try:
+        stop_remote_user(node, user_name)
+        start_remote_user(node, user_name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     with get_conn() as conn:
-        total = conn.execute("SELECT COUNT(*) AS c FROM users WHERE node_id=?", (node_id,)).fetchone()["c"]
-    return {"ok": True, "imported": 0, "total": total}
+        conn.execute("UPDATE users SET traffic_reset_at=datetime('now'), traffic_rx_snap=NULL, traffic_tx_snap=NULL, status='active' WHERE node_id=? AND name=?", (node_id, user_name))
+    return {"ok": True}
 
 
 @app.get("/api/nodes/{node_id}/mtg-version", dependencies=[Depends(require_auth)])
 def mtg_version(node_id: int):
     with get_conn() as conn:
-        exists = conn.execute("SELECT id FROM nodes WHERE id=?", (node_id,)).fetchone()
-        if not exists:
+        node = conn.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
+        if not node:
             raise HTTPException(status_code=404, detail="Node not found")
-    return {"version": "mtg:2 (unknown)", "raw": "FastAPI test backend: no SSH inspect"}
+    try:
+        out = ssh_exec(node, "docker inspect nineseconds/mtg:2 --format 'mtg:2 | built {{.Created}}' 2>/dev/null | head -1")
+        return {"version": (out.splitlines()[0] if out else "unknown"), "raw": out}
+    except Exception as e:
+        return {"version": "error", "error": str(e)}
 
 
 @app.post("/api/nodes/{node_id}/mtg-update", dependencies=[Depends(require_auth)])
 def mtg_update(node_id: int):
     with get_conn() as conn:
-        exists = conn.execute("SELECT id FROM nodes WHERE id=?", (node_id,)).fetchone()
-        if not exists:
+        node = conn.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
+        if not node:
             raise HTTPException(status_code=404, detail="Node not found")
-    return {"ok": False, "output": "FastAPI test backend: mtg-update через SSH пока не реализован"}
+    try:
+        out = ssh_exec(node, "docker pull nineseconds/mtg:2 2>&1 | tail -3", timeout=80)
+        return {"ok": True, "output": out}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/status", dependencies=[Depends(require_auth)])
@@ -610,44 +714,35 @@ def status():
     with get_conn() as conn:
         nodes = conn.execute("SELECT * FROM nodes").fetchall()
 
-    data = []
-    for n in nodes:
-        users_count = 0
-        online_users = 0
-        online = False
-        error = None
-
+    results = []
+    for node in nodes:
         try:
-            with closing(socket.create_connection((n["host"], int(n["ssh_port"] or 22)), timeout=1.5)):
-                online = True
-        except OSError as exc:
-            error = str(exc)
+            online = True
+            ssh_exec(node, "echo ok", timeout=8)
+            error = None
+        except Exception as e:
+            online = False
+            error = str(e)
 
         with get_conn() as conn:
-            users = conn.execute("SELECT name, status FROM users WHERE node_id=?", (n["id"],)).fetchall()
-            users_count = len(users)
+            users = conn.execute("SELECT name FROM users WHERE node_id=?", (node["id"],)).fetchall()
 
-        metrics = fetch_agent_metrics(n)
+        metrics = fetch_agent_metrics(node)
         if metrics:
-            for u in users:
-                if metrics.get(u["name"], {}).get("connections", 0) > 0:
-                    online_users += 1
+            online_users = len([u for u in users if metrics.get(u["name"], {}).get("connections", 0) > 0])
         else:
-            remote_users = get_remote_users(n)
-            online_users = len([u for u in remote_users if int(u.get("connections", 0)) > 0])
+            remote = get_remote_users(node)
+            online_users = len([u for u in remote if int(u.get("connections", 0)) > 0])
 
-        data.append(
-            {
-                "id": n["id"],
-                "name": n["name"],
-                "host": n["host"],
-                "online": online,
-                "users": users_count,
-                "online_users": online_users,
-                "error": error,
-            }
-        )
-    return data
+        results.append({
+            "id": node["id"],
+            "name": node["name"],
+            "host": node["host"],
+            "online": online,
+            "online_users": online_users,
+            "error": error,
+        })
+    return results
 
 
 @app.get("/api/totp/status", dependencies=[Depends(require_auth)])
@@ -660,8 +755,7 @@ def totp_setup():
     secret = pyotp.random_base32()
     set_setting("totp_secret", secret)
     set_setting("totp_enabled", "0")
-    uri = pyotp.TOTP(secret).provisioning_uri(name="admin", issuer_name="MTG Panel")
-    return {"secret": secret, "qr": uri}
+    return {"secret": secret, "qr": pyotp.TOTP(secret).provisioning_uri(name="admin", issuer_name="MTG Panel")}
 
 
 @app.post("/api/totp/verify", dependencies=[Depends(require_auth)])
