@@ -401,9 +401,10 @@ MIT
 ```bash
 git checkout mtg-test
 docker compose -f docker-compose.fastapi.yml up -d --build
+# FastAPI test UI: http://server:3001
 ```
 
-После запуска панель доступна на `http://server:3000`, а API работает через FastAPI (`/api/*`).
+После запуска FastAPI тест-контур доступен на `http://server:3001`, а API работает через FastAPI (`/api/*`).
 
 ### Что уже перенесено
 
