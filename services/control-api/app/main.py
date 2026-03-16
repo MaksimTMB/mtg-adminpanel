@@ -2,6 +2,7 @@ import json
 import os
 import socket
 import sqlite3
+import io
 import urllib.error
 import urllib.request
 from contextlib import closing
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 import pyotp
+import paramiko
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -189,6 +191,94 @@ def fetch_agent_metrics(node: sqlite3.Row) -> Dict[str, dict]:
     return out
 
 
+def ssh_exec(node: sqlite3.Row, command: str) -> str:
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    kwargs = {
+        "hostname": node["host"],
+        "port": int(node["ssh_port"] or 22),
+        "username": node["ssh_user"] or "root",
+        "timeout": 8,
+        "banner_timeout": 8,
+        "auth_timeout": 8,
+    }
+    ssh_key = node["ssh_key"]
+    ssh_password = node["ssh_password"]
+    if ssh_key:
+        pkey = None
+        for key_cls in (paramiko.RSAKey, paramiko.Ed25519Key, paramiko.ECDSAKey):
+            try:
+                pkey = key_cls.from_private_key(io.StringIO(ssh_key))
+                break
+            except Exception:
+                continue
+        if not pkey:
+            raise RuntimeError("invalid ssh key")
+        kwargs["pkey"] = pkey
+    elif ssh_password:
+        kwargs["password"] = ssh_password
+
+    client.connect(**kwargs)
+    try:
+        _, stdout, stderr = client.exec_command(command, timeout=15)
+        out = stdout.read().decode("utf-8", errors="ignore").strip()
+        err = stderr.read().decode("utf-8", errors="ignore").strip()
+        if err and not out:
+            raise RuntimeError(err)
+        return out
+    finally:
+        client.close()
+
+
+def get_remote_users(node: sqlite3.Row):
+    cmd = "\n".join([
+        f"BASE={node['base_dir'] or '/opt/mtg/users'}",
+        "for DIR in $BASE/*/; do",
+        "  [ -d \"$DIR\" ] || continue",
+        "  NAME=$(basename \"$DIR\")",
+        "  SECRET=$(grep secret \"$DIR/config.toml\" 2>/dev/null | awk -F'\"' '{print $2}')",
+        "  PORT=$(grep -o '[0-9]*:3128' \"$DIR/docker-compose.yml\" 2>/dev/null | cut -d: -f1)",
+        "  STATUS=$(docker ps --filter \"name=mtg-$NAME\" --format '{{.Status}}' 2>/dev/null)",
+        "  CONNS=$(docker exec mtg-$NAME sh -c \"cat /proc/net/tcp 2>/dev/null | awk 'NR>1 && $4==\\\"01\\\"{c++} END{print c+0}'\" 2>/dev/null || echo 0)",
+        "  echo \"USER|$NAME|$PORT|$SECRET|${STATUS:-stopped}|$CONNS\"",
+        "done",
+    ])
+    try:
+        out = ssh_exec(node, cmd)
+    except Exception:
+        return []
+    users = []
+    for line in out.splitlines():
+        if not line.startswith("USER|"):
+            continue
+        _, name, port, secret, status, conns = line.split("|", 5)
+        users.append({
+            "name": name,
+            "port": int(port) if str(port).isdigit() else None,
+            "secret": secret or None,
+            "status": status or "stopped",
+            "connections": int(conns) if str(conns).isdigit() else 0,
+        })
+    return users
+
+
+def get_remote_traffic(node: sqlite3.Row):
+    cmd = "docker stats --no-stream --format '{{.Name}}|{{.NetIO}}' 2>/dev/null | grep '^mtg-' | grep -v 'mtg-agent'"
+    try:
+        out = ssh_exec(node, cmd)
+    except Exception:
+        return {}
+    result = {}
+    for line in out.splitlines():
+        if "|" not in line:
+            continue
+        name, netio = line.split("|", 1)
+        user_name = name.replace("mtg-", "").strip()
+        parts = [p.strip() for p in netio.split("/")]
+        result[user_name] = {"rx": parts[0] if parts else "0B", "tx": parts[1] if len(parts) > 1 else "0B"}
+    return result
+
+
 def iso_now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -303,7 +393,7 @@ def check_agent(node_id: int):
         if not node:
             raise HTTPException(status_code=404, detail="Node not found")
     metrics = fetch_agent_metrics(node)
-    return {"available": len(metrics) >= 0 and bool(node["agent_port"]) and (len(metrics) > 0)}
+    return {"available": bool(node["agent_port"]) and (len(metrics) > 0)}
 
 
 @app.post("/api/nodes/{node_id}/update-agent", dependencies=[Depends(require_auth)])
@@ -341,11 +431,14 @@ def node_traffic(node_id: int):
         users = conn.execute("SELECT name, traffic_rx_snap, traffic_tx_snap FROM users WHERE node_id=?", (node_id,)).fetchall()
 
     metrics = fetch_agent_metrics(node)
+    ssh_traffic = get_remote_traffic(node) if not metrics else {}
     out = {}
     for u in users:
         m = metrics.get(u["name"])
         if m:
             out[u["name"]] = m.get("traffic", {"rx": "—", "tx": "—", "rx_bytes": 0, "tx_bytes": 0})
+        elif u["name"] in ssh_traffic:
+            out[u["name"]] = {"rx": ssh_traffic[u["name"]].get("rx", "0B"), "tx": ssh_traffic[u["name"]].get("tx", "0B"), "rx_bytes": 0, "tx_bytes": 0}
         elif u["traffic_rx_snap"] or u["traffic_tx_snap"]:
             out[u["name"]] = {"rx": u["traffic_rx_snap"] or "—", "tx": u["traffic_tx_snap"] or "—", "rx_bytes": 0, "tx_bytes": 0}
     return out
@@ -360,6 +453,8 @@ def list_node_users(node_id: int):
         users = conn.execute("SELECT * FROM users WHERE node_id=?", (node_id,)).fetchall()
 
     metrics = fetch_agent_metrics(node)
+    remote_users = get_remote_users(node) if not metrics else []
+    remote_by_name = {u["name"]: u for u in remote_users}
     result = []
     for u in users:
         item = row_to_dict(u)
@@ -372,8 +467,11 @@ def list_node_users(node_id: int):
                 expired = False
 
         m = metrics.get(item["name"], {})
-        running = m.get("running", item.get("status") != "stopped")
-        connections = int(m.get("connections", 0))
+        r = remote_by_name.get(item["name"], {})
+        running = m.get("running")
+        if running is None:
+            running = not str(r.get("status", "")).lower().startswith("stopped") if r else (item.get("status") != "stopped")
+        connections = int(m.get("connections", r.get("connections", 0) or 0))
         is_online = bool(m.get("is_online", connections > 0))
 
         if is_online:
@@ -393,7 +491,9 @@ def list_node_users(node_id: int):
                 "connections": connections,
                 "is_online": is_online,
                 "expired": expired,
-                "link": f"tg://proxy?server={node['host']}&port={item['port']}&secret={item['secret']}",
+                "port": item.get("port") or r.get("port"),
+                "secret": item.get("secret") or r.get("secret"),
+                "link": f"tg://proxy?server={node['host']}&port={item.get('port') or r.get('port') or ''}&secret={item.get('secret') or r.get('secret') or ''}",
             }
         )
         result.append(item)
@@ -533,7 +633,8 @@ def status():
                 if metrics.get(u["name"], {}).get("connections", 0) > 0:
                     online_users += 1
         else:
-            online_users = 0
+            remote_users = get_remote_users(n)
+            online_users = len([u for u in remote_users if int(u.get("connections", 0)) > 0])
 
         data.append(
             {
