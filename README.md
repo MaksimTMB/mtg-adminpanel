@@ -389,3 +389,29 @@ docker compose down && docker compose up -d
 ## Лицензия
 
 MIT
+
+---
+
+## FastAPI test mode (ветка `mtg-test`)
+
+В этой ветке добавлен отдельный сервис `services/control-api` (FastAPI), чтобы протестировать переход вживую без удаления текущего Express backend.
+
+### Запуск FastAPI варианта
+
+```bash
+git checkout mtg-test
+docker compose -f docker-compose.fastapi.yml up -d --build
+```
+
+После запуска панель доступна на `http://server:3000`, а API работает через FastAPI (`/api/*`).
+
+### Что уже перенесено
+
+- `GET /api/version`
+- `GET/POST/PUT/DELETE /api/nodes`
+- `GET /api/nodes/:id/check`
+- `GET/POST /api/nodes/:id/users`
+- `GET /api/status`
+- `TOTP`: `/api/totp/status`, `/api/totp/setup`, `/api/totp/verify`, `/api/totp/disable`
+
+> Это тестовый контур для live-проверки архитектуры. Дальше можно поэтапно переносить SSH/agent операции и тяжелые маршруты из `backend/src/app.js`.

@@ -1,0 +1,15 @@
+services:
+  mtg-panel-fastapi:
+    build:
+      context: .
+      dockerfile: services/control-api/Dockerfile
+    container_name: mtg-panel-fastapi
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/data
+    environment:
+      - AUTH_TOKEN=${AUTH_TOKEN:-changeme}
+      - DATA_DIR=/data
+      - PUBLIC_DIR=/app/public
