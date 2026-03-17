@@ -126,6 +126,14 @@ app.get('/api/nodes', (req, res) => {
   res.json(db.prepare('SELECT id, name, host, ssh_user, ssh_port, base_dir, start_port, created_at, flag, agent_port FROM nodes').all());
 });
 
+// Fast DB-only counts — zero SSH/agent calls, used by dashboard
+app.get('/api/nodes/counts', (req, res) => {
+  const rows = db.prepare('SELECT node_id, COUNT(*) as count FROM users GROUP BY node_id').all();
+  const counts = {};
+  for (const r of rows) counts[r.node_id] = r.count;
+  res.json(counts);
+});
+
 app.post('/api/nodes', async (req, res) => {
   const { name, host, ssh_user, ssh_port, ssh_key, ssh_password, base_dir, start_port, flag, agent_port, auto_install_agent } = req.body;
   if (!name || !host) return res.status(400).json({ error: 'name и host обязательны' });
@@ -252,21 +260,15 @@ app.get('/api/status', async (req, res) => {
   const nodes = db.prepare('SELECT * FROM nodes').all();
   const results = await Promise.allSettled(
     nodes.map(async node => {
+      // getNodeStatus via agent returns metrics from cache (fast)
+      // online_users extracted from same metrics payload — no second call
       const status = await ssh.getNodeStatus(node);
-      // online_users only via agent (fast) — skip SSH nodes to avoid slowdown
-      let online_users = 0;
-      if (node.agent_port) {
-        try {
-          const remoteUsers = await ssh.getRemoteUsers(node);
-          online_users = remoteUsers.filter(u => (u.connections || 0) > 0).length;
-        } catch (_) {}
-      }
-      return { id: node.id, name: node.name, host: node.host, ...status, online_users };
+      return { id: node.id, name: node.name, host: node.host, ...status };
     })
   );
   res.json(results.map((r, i) => r.status === 'fulfilled'
     ? r.value
-    : { id: nodes[i].id, name: nodes[i].name, online: false, online_users: 0 }
+    : { id: nodes[i].id, name: nodes[i].name, online: false, containers: 0, online_users: 0 }
   ));
 });
 

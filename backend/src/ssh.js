@@ -70,7 +70,7 @@ function sshExec(node, command) {
       host: node.host,
       port: node.ssh_port || 22,
       username: node.ssh_user || 'root',
-      readyTimeout: 8000,
+      readyTimeout: 3000,
     };
 
     if (node.ssh_key)      config.privateKey = node.ssh_key;
@@ -103,25 +103,26 @@ async function checkNode(node) {
 }
 
 async function getNodeStatus(node) {
-  // Agent-first: fast HTTP call
+  // Agent-first: fast HTTP call (data comes from agent cache — < 10ms)
   if (node.agent_port) {
     try {
       const data = await agentGet(node, '/metrics');
       const containers = data.containers || [];
-      const running = containers.filter(c => c.running).length;
-      return { online: true, containers: running, via_agent: true };
+      const running     = containers.filter(c => c.running).length;
+      const online_users = containers.filter(c => (c.connections || 0) > 0).length;
+      return { online: true, containers: running, online_users, via_agent: true };
     } catch {}
   }
-  // SSH fallback
+  // SSH fallback (slow — only when no agent)
   try {
     const r = await sshExec(node, "COUNT=$(docker ps --filter 'name=mtg-' --format '{{.Names}}' 2>/dev/null | grep -v mtg-agent | wc -l); echo \"ONLINE|$COUNT\"");
     if (r.output.startsWith('ONLINE|')) {
       const count = parseInt(r.output.split('|')[1]) || 0;
-      return { online: true, containers: count };
+      return { online: true, containers: count, online_users: 0 };
     }
-    return { online: false, containers: 0 };
+    return { online: false, containers: 0, online_users: 0 };
   } catch {
-    return { online: false, containers: 0 };
+    return { online: false, containers: 0, online_users: 0 };
   }
 }
 

@@ -86,11 +86,9 @@ export default function App() {
 
   const loadCounts = useCallback(async (list) => {
     try {
-      const wc = await Promise.all(list.map(async n => {
-        try { const u = await api('GET', `/api/nodes/${n.id}/users`); return {...n, _userCount: u.length}; }
-        catch { return {...n, _userCount: 0}; }
-      }));
-      setNodes(wc);
+      // DB-only endpoint — no SSH/agent calls, instant response
+      const counts = await api('GET', '/api/nodes/counts');
+      setNodes(list.map(n => ({ ...n, _userCount: counts[n.id] || 0 })));
     } catch {}
   }, []);
 
@@ -101,7 +99,7 @@ export default function App() {
   }, []);
 
   useEffect(() => { if (authed) loadNodes(); }, [authed]);
-  useEffect(() => { if (nodes.length && !nodes[0]._userCount) loadCounts(nodes); }, [nodes]);
+  useEffect(() => { if (nodes.length) loadCounts(nodes); }, [nodes.length]);
 
   const nav = (p) => { setPage(p); setSelNode(null); setSelNodeView(null); };
   const selectNode   = (n) => { setSelNode(n); setPage('users'); };
