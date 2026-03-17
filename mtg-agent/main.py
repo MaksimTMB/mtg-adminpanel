@@ -125,6 +125,7 @@ def _compute_all() -> list:
     BASE_DIR.mkdir(parents=True, exist_ok=True)
     containers = _get_mtg_containers()   # None means SDK failed → use CLI fallback
     sdk_ok = containers is not None
+    print(f"[compute] SDK ok={sdk_ok}, found {len(containers) if containers else 'N/A'} mtg-* containers")
     by_name = {c.name: c for c in (containers or [])}
     result = []
 
@@ -140,6 +141,7 @@ def _compute_all() -> list:
             running = False  # SDK works, container genuinely not found → stopped
         else:
             running = _container_running_cli(f"mtg-{name}")  # SDK failed → CLI fallback
+        print(f"[compute]   {name}: container={'mtg-'+name if c else 'NOT FOUND'}, status={c.status if c else 'n/a'}, running={running}")
         devices  = _connections(c) if (running and c is not None) else 0
         traffic  = _traffic(c)     if (running and c is not None) else {"rx": "—", "tx": "—", "rx_bytes": 0, "tx_bytes": 0}
         result.append({

@@ -60,6 +60,17 @@ async function _refreshNode(node) {
       node.agent_port ? ssh.agentGetPublic(node, '/health').catch(() => null) : Promise.resolve(null),
     ]);
 
+    if (statusResult.status === 'rejected')
+      console.error(`[nodeCache] ${node.name} status error:`, statusResult.reason?.message);
+    if (usersResult.status === 'rejected')
+      console.error(`[nodeCache] ${node.name} users error:`, usersResult.reason?.message);
+
+    const remoteUsers = usersResult.status === 'fulfilled' ? usersResult.value : null;
+    if (remoteUsers) {
+      const running = remoteUsers.filter(u => u.running).length;
+      console.log(`[nodeCache] ${node.name}: ${remoteUsers.length} users, ${running} running, via_agent=${remoteUsers[0]?.via_agent||false}`);
+    }
+
     const prev = cache.get(node.id) || _empty();
     cache.set(node.id, {
       status:       statusResult.status  === 'fulfilled' ? statusResult.value  : prev.status,
@@ -71,7 +82,7 @@ async function _refreshNode(node) {
       error: statusResult.status === 'rejected' ? String(statusResult.reason) : null,
     });
   } catch (e) {
-    // Keep stale data on error — better than empty
+    console.error(`[nodeCache] ${node.name} refresh crashed:`, e.message);
     const prev = cache.get(node.id);
     if (prev) cache.set(node.id, { ...prev, error: String(e), updatedAt: Date.now() });
   }

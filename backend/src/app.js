@@ -482,6 +482,38 @@ app.get('/api/nodes/:id/users/:name/history', (req, res) => {
   res.json(rows.reverse());
 });
 
+// ── Debug endpoint: shows full diagnostic info ─────────────
+app.get('/api/nodes/:id/debug', async (req, res) => {
+  const node = db.prepare('SELECT * FROM nodes WHERE id = ?').get(req.params.id);
+  if (!node) return res.status(404).json({ error: 'Not found' });
+
+  const report = {
+    node: { id: node.id, name: node.name, host: node.host, agent_port: node.agent_port, base_dir: node.base_dir },
+    nodeCache: nodeCache.get(node.id),
+    agentDirect: null,
+    agentDirectError: null,
+    agentUsersRaw: null,
+    agentUsersError: null,
+  };
+
+  // Direct agent health check
+  if (node.agent_port) {
+    try {
+      report.agentDirect = await ssh.agentGetPublic(node, '/health');
+    } catch (e) {
+      report.agentDirectError = e.message;
+    }
+    try {
+      report.agentUsersRaw = await ssh.agentGetPublic(node, '/users');
+    } catch (e) {
+      report.agentUsersError = e.message;
+    }
+  }
+
+  console.log('[DEBUG]', JSON.stringify(report, null, 2));
+  res.json(report);
+});
+
 // ── SPA fallback ──────────────────────────────────────────
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
