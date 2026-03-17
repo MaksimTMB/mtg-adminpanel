@@ -126,13 +126,33 @@ app.get('/api/nodes', (req, res) => {
   res.json(db.prepare('SELECT id, name, host, ssh_user, ssh_port, base_dir, start_port, created_at, flag, agent_port FROM nodes').all());
 });
 
-app.post('/api/nodes', (req, res) => {
-  const { name, host, ssh_user, ssh_port, ssh_key, ssh_password, base_dir, start_port, flag, agent_port } = req.body;
+app.post('/api/nodes', async (req, res) => {
+  const { name, host, ssh_user, ssh_port, ssh_key, ssh_password, base_dir, start_port, flag, agent_port, auto_install_agent } = req.body;
   if (!name || !host) return res.status(400).json({ error: 'name и host обязательны' });
   const result = db.prepare(
     'INSERT INTO nodes (name, host, ssh_user, ssh_port, ssh_key, ssh_password, base_dir, start_port, flag, agent_port) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(name, host, ssh_user||'root', ssh_port||22, ssh_key||null, ssh_password||null, base_dir||'/opt/mtg/users', start_port||4433, flag||null, agent_port||null);
-  res.json({ id: result.lastInsertRowid, name, host });
+  ).run(name, host, ssh_user||'root', ssh_port||22, ssh_key||null, ssh_password||null, base_dir||'/opt/mtg/users', start_port||4433, flag||null, agent_port||8081);
+  const nodeId = result.lastInsertRowid;
+  res.json({ id: nodeId, name, host });
+
+  // Auto-install agent in background if SSH creds provided
+  if ((ssh_key || ssh_password) && auto_install_agent !== false) {
+    const node = db.prepare('SELECT * FROM nodes WHERE id = ?').get(nodeId);
+    const token = process.env.AGENT_TOKEN || 'mtg-agent-secret';
+    const RAW = 'https://raw.githubusercontent.com/MaksimTMB/mtg-adminpanel/dev/mtg-agent';
+    const cmd = [
+      `mkdir -p /opt/mtg-agent && cd /opt/mtg-agent`,
+      `wget -q "${RAW}/main.py" -O main.py || curl -fsSL "${RAW}/main.py" -o main.py`,
+      `wget -q "${RAW}/docker-compose.yml" -O docker-compose.yml || curl -fsSL "${RAW}/docker-compose.yml" -o docker-compose.yml`,
+      `echo "AGENT_TOKEN=${token}" > .env`,
+      `docker compose down 2>/dev/null || true`,
+      `docker compose up -d`,
+      `echo "==> Done"`
+    ].join(' && ');
+    ssh.sshExec(node, cmd)
+      .then(r => console.log(`✅ Agent auto-installed on node ${nodeId}: ${r.output.slice(-100)}`))
+      .catch(e => console.warn(`⚠️ Agent auto-install failed on node ${nodeId}: ${e.message}`));
+  }
 });
 
 app.put('/api/nodes/:id', (req, res) => {
@@ -409,8 +429,7 @@ app.post('/api/nodes/:id/users/:name/reset-traffic', async (req, res) => {
   const node = db.prepare('SELECT * FROM nodes WHERE id = ?').get(req.params.id);
   if (!node) return res.status(404).json({ error: 'Node not found' });
   try {
-    await ssh.stopRemoteUser(node, req.params.name);
-    await ssh.startRemoteUser(node, req.params.name);
+    await ssh.restartRemoteUser(node, req.params.name);
     db.prepare(`UPDATE users SET
       traffic_reset_at=datetime('now'), traffic_rx_snap=NULL, traffic_tx_snap=NULL,
       status='active' WHERE node_id=? AND name=?`

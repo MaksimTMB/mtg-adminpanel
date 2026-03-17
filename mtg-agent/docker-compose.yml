@@ -6,10 +6,14 @@ services:
     network_mode: host
     pid: host                   # видит все PID хоста — читаем /proc/{pid}/net/tcp6
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/run/docker.sock:/var/run/docker.sock  # rw — создаёт контейнеры
       - /proc:/proc:ro
+      - /opt/mtg/users:/opt/mtg/users              # rw — создаёт/удаляет пользователей
+      - /usr/bin/docker:/usr/bin/docker:ro          # docker CLI для compose
+      - /usr/libexec/docker:/usr/libexec/docker:ro  # docker compose plugin
       - ./main.py:/app/main.py:ro
     working_dir: /app
     environment:
       - AGENT_TOKEN=${AGENT_TOKEN:-mtg-agent-secret}
-    command: sh -c "pip install --quiet fastapi uvicorn docker && uvicorn main:app --host 0.0.0.0 --port 8081"
+      - START_PORT=${START_PORT:-4433}
+    command: sh -c "pip install --quiet fastapi uvicorn docker pydantic && uvicorn main:app --host 0.0.0.0 --port 8081"

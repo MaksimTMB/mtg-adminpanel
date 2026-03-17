@@ -6,6 +6,10 @@ export const setTotpCode = (c) => {
   else   sessionStorage.removeItem('mtg_totp');
 };
 
+// Global handler called when any request gets TOTP_REQUIRED (e.g. after enabling 2FA mid-session)
+let _totpRequiredHandler = null;
+export function setTotpRequiredHandler(fn) { _totpRequiredHandler = fn; }
+
 const _pend = {};
 export async function api(method, path, body) {
   const key = `${method}:${path}`;
@@ -21,7 +25,11 @@ export async function api(method, path, body) {
       if (r.status === 401) { setToken(''); throw new Error('Unauthorized'); }
       if (r.status === 403) {
         const d = await r.json().catch(() => ({}));
-        if (d.totp) throw new Error('TOTP_REQUIRED');
+        if (d.totp) {
+          setTotpCode('');
+          if (_totpRequiredHandler) _totpRequiredHandler();
+          throw new Error('TOTP_REQUIRED');
+        }
         throw new Error(d.error || 'Forbidden');
       }
       const data = await r.json();

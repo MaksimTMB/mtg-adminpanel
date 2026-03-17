@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { api, getToken, setToken } from './api.js';
+import { api, getToken, setToken, setTotpCode, setTotpRequiredHandler } from './api.js';
 import { useToast, Toasts } from './toast.jsx';
 import Login from './components/Login.jsx';
 import Dashboard from './components/Dashboard.jsx';
@@ -11,6 +11,59 @@ import Settings from './components/Settings.jsx';
 import VersionBlock from './components/VersionBlock.jsx';
 import * as I from './icons.jsx';
 
+// ── Inline TOTP re-auth overlay ──────────────────────────
+function TotpOverlay({ onDone }) {
+  const [code, setCode] = useState('');
+  const [err,  setErr]  = useState(false);
+
+  const submit = async e => {
+    e.preventDefault();
+    if (code.length !== 6) return;
+    setTotpCode(code);
+    try {
+      await api('GET', '/api/totp/status');
+      onDone();
+    } catch {
+      setTotpCode('');
+      setCode('');
+      setErr(true);
+    }
+  };
+
+  return (
+    <div style={{
+      position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',
+      display:'flex',alignItems:'center',justifyContent:'center',zIndex:9999
+    }}>
+      <div className="login-card" style={{margin:0}}>
+        <div className="login-head">
+          <div className="login-icon"><I.Shield/></div>
+          <div className="login-title">Требуется 2FA</div>
+          <div className="login-sub">Сессия требует подтверждения</div>
+        </div>
+        <div className="login-body">
+          <form onSubmit={submit}>
+            <p style={{fontSize:13,color:'var(--t2)',textAlign:'center',marginBottom:18,lineHeight:1.6}}>
+              Введи текущий код из приложения<br/>Google Authenticator
+            </p>
+            <div className="form-group">
+              <input className="form-input totp-code-input" type="text" inputMode="numeric"
+                placeholder="——————" value={code} maxLength={6}
+                onChange={e => { setCode(e.target.value.replace(/\D/g,'')); setErr(false); }}
+                autoFocus/>
+              {err && <div style={{color:'var(--re)',fontSize:12,marginTop:6}}>Неверный код</div>}
+            </div>
+            <button className="btn btn-primary" style={{width:'100%',justifyContent:'center',padding:10}}
+              type="submit" disabled={code.length !== 6}>
+              <I.Check/> Подтвердить
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [authed, setAuthed]           = useState(!!getToken());
   const [page, setPage]               = useState('dashboard');
@@ -18,7 +71,14 @@ export default function App() {
   const [selNode, setSelNode]         = useState(null);
   const [selNodeView, setSelNodeView] = useState(null);
   const [panelVersion, setPanelVersion] = useState(null);
+  const [totpNeeded, setTotpNeeded]   = useState(false);
   const toasts = useToast();
+
+  // Register global TOTP-required handler
+  useEffect(() => {
+    setTotpRequiredHandler(() => setTotpNeeded(true));
+    return () => setTotpRequiredHandler(null);
+  }, []);
 
   const loadNodes = useCallback(async () => {
     try { const n = await api('GET', '/api/nodes'); setNodes(n || []); } catch {}
@@ -63,6 +123,10 @@ export default function App() {
 
   return (
     <div className="app">
+      {totpNeeded && (
+        <TotpOverlay onDone={() => { setTotpNeeded(false); loadNodes(); }}/>
+      )}
+
       <aside className="sidebar" id="sidebar">
         <div className="sidebar-logo">
           <div className="logo-icon"><I.Zap/></div>
@@ -87,7 +151,7 @@ export default function App() {
 
         <div className="sidebar-footer">
           <button className="btn btn-ghost btn-sm" style={{width:'100%',justifyContent:'center',marginTop:8}}
-            onClick={() => { setToken(''); setAuthed(false); }}>
+            onClick={() => { setToken(''); setTotpCode(''); setAuthed(false); }}>
             <I.LogOut/> Выйти
           </button>
         </div>

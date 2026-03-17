@@ -29,6 +29,8 @@ export default function Settings() {
     setLoading(true);
     try {
       await api('POST', '/api/totp/verify', {code: verify});
+      // Save current code immediately so session stays authenticated
+      setTotpCode(verify);
       toast('2FA включена!', 'success');
       setEnabled(true); setStep('idle'); setData(null); setVerify('');
     } catch { toast('Неверный код', 'error'); }
