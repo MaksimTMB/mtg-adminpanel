@@ -49,6 +49,17 @@ def _get_mtg_containers():
         return []
 
 
+def _container_running_cli(name: str) -> bool:
+    """CLI fallback: check if container is running (used when Docker SDK unavailable)."""
+    try:
+        r = subprocess.run(
+            ["docker", "inspect", "--format", "{{.State.Running}}", name],
+            capture_output=True, text=True)
+        return r.returncode == 0 and r.stdout.strip() == "true"
+    except Exception:
+        return False
+
+
 def _connections(container) -> int:
     try:
         container.reload()
@@ -121,9 +132,14 @@ def _compute_all() -> list:
         name     = user_dir.name
         cfg      = _read_config(user_dir)
         c        = by_name.get(f"mtg-{name}")
-        running  = c is not None and c.status == "running"
-        devices  = _connections(c) if running else 0
-        traffic  = _traffic(c)     if running else {"rx": "—", "tx": "—", "rx_bytes": 0, "tx_bytes": 0}
+        if c is not None:
+            running = c.status == "running"
+        elif dclient:
+            running = False  # SDK available but container not found → truly stopped
+        else:
+            running = _container_running_cli(f"mtg-{name}")  # SDK unavailable → CLI fallback
+        devices  = _connections(c) if (running and c is not None) else 0
+        traffic  = _traffic(c)     if (running and c is not None) else {"rx": "—", "tx": "—", "rx_bytes": 0, "tx_bytes": 0}
         result.append({
             "name":        name,
             "port":        cfg["port"],

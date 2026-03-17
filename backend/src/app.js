@@ -260,10 +260,12 @@ app.get('/api/nodes/:id/summary', (req, res) => {
       ...u,
       port:        r?.port        || u.port,
       secret:      r?.secret      || u.secret,
-      running:     r ? (r.status === 'Up' || r.running === true) : false,
+      running:     r ? (r.running === true || (r.status || '').includes('Up')) : false,
       connections: r?.connections || 0,
       is_online:   (r?.connections || 0) > 0,
       traffic:     r?.traffic     || null,
+      link: `tg://proxy?server=${node.host}&port=${u.port}&secret=${u.secret}`,
+      expired: u.expires_at ? new Date(u.expires_at) < new Date() : false,
     };
   }
   const users = dbUsers.map(u => mkUser(u, remote.find(r => r.name === u.name)));
