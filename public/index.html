@@ -1035,7 +1035,7 @@ function Dashboard({ nodes, onSelectNode, onManageNode }) {
   const totalUsers    = useMemo(() => nodes.reduce((a,n)=>a+(n._userCount||0),0), [nodes]);
   const onlineNodes   = useMemo(() => status.filter(s=>s.online).length, [status]);
   const activeProxies = useMemo(() => status.reduce((a,s)=>a+(s.containers||0),0), [status]);
-  const stoppedProxies = totalUsers - activeProxies;
+  const stoppedProxies = Math.max(0, totalUsers - activeProxies);
   const totalOnline   = useMemo(() => status.reduce((a,s)=>a+(s.online_users||0),0), [status]);
 
   return (
@@ -1551,6 +1551,7 @@ function AddUserModal({ nodeId, onClose, onSave }) {
 
   const submit = async () => {
     if(!f.name.trim()){toast('Введи имя','error');return;}
+    if(f.name.length > 32){toast('Имя не может быть длиннее 32 символов','error');return;}
     setLoading(true);
     try {
       const u = await api('POST',`/api/nodes/${nodeId}/users`,{

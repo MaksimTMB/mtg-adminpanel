@@ -56,6 +56,15 @@ app.get('/api/version', (req, res) => {
 app.use('/api', (req, res, next) => {
   const token = req.headers['x-auth-token'] || req.query.token;
   if (token !== AUTH_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
+  // TOTP validation — exempt setup/verify/status (needed to configure 2FA itself)
+  const totpExempt = ['/totp/setup', '/totp/verify', '/totp/status', '/totp/disable'];
+  if (isTotpEnabled() && !totpExempt.some(p => req.path.startsWith(p))) {
+    const code = req.headers['x-totp-code'];
+    const secret = getTotpSecret();
+    if (!code || !authenticator.verify(code, secret)) {
+      return res.status(403).json({ error: 'TOTP required', totp: true });
+    }
+  }
   next();
 });
 
@@ -301,6 +310,7 @@ app.post('/api/nodes/:id/users', async (req, res) => {
   if (!node) return res.status(404).json({ error: 'Node not found' });
   const { name, note, expires_at, traffic_limit_gb } = req.body;
   if (!name) return res.status(400).json({ error: 'name required' });
+  if (!/^[a-zA-Z0-9_-]{1,32}$/.test(name)) return res.status(400).json({ error: 'Имя: только буквы, цифры, _ и - (макс 32 символа)' });
   if (db.prepare('SELECT id FROM users WHERE node_id = ? AND name = ?').get(req.params.id, name)) {
     return res.status(400).json({ error: 'User already exists' });
   }
@@ -512,7 +522,7 @@ async function recordHistory() {
         } catch (e) { console.error(`Failed to auto-reset traffic for ${u.name}:`, e.message); }
       }
 
-    } catch (_) {}
+    } catch (e) { console.error(`recordHistory error on node ${node.id}:`, e.message); }
   }
   db.prepare("DELETE FROM connections_history WHERE recorded_at < datetime('now', '-24 hours')").run();
 }
