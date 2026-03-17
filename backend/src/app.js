@@ -283,6 +283,8 @@ app.post('/api/nodes/:id/sync', async (req, res) => {
     const remoteUsers = await ssh.getRemoteUsers(node);
     let imported = 0;
     for (const u of remoteUsers) {
+      // Skip agent-sourced entries without port/secret (agent doesn't read config files)
+      if (u.port === null || u.secret === null) continue;
       const exists = db.prepare('SELECT id FROM users WHERE node_id = ? AND name = ?').get(req.params.id, u.name);
       if (!exists) {
         db.prepare('INSERT INTO users (node_id, name, port, secret, note, expires_at, traffic_limit_gb) VALUES (?, ?, ?, ?, ?, ?, ?)')
@@ -464,6 +466,23 @@ async function recordHistory() {
             console.log(`🛑 Auto-stopped ${u.name}: exceeded device limit`);
           } catch (e) { console.error('Failed to stop user:', e.message); }
         }
+
+        // Traffic limit enforcement
+        if (dbUser && dbUser.traffic_limit_gb && dbUser.status !== 'stopped') {
+          const t = traffic[u.name];
+          if (t) {
+            const totalBytes = parseBytes(t.rx) + parseBytes(t.tx);
+            const limitBytes = dbUser.traffic_limit_gb * 1073741824;
+            if (totalBytes >= limitBytes) {
+              console.log(`⚠️ Traffic limit exceeded: ${u.name} on node ${node.id} (${(totalBytes/1073741824).toFixed(2)}GB / ${dbUser.traffic_limit_gb}GB)`);
+              try {
+                await ssh.stopRemoteUser(node, u.name);
+                db.prepare('UPDATE users SET status=? WHERE node_id=? AND name=?').run('stopped', node.id, u.name);
+                console.log(`🛑 Auto-stopped ${u.name}: exceeded traffic limit`);
+              } catch (e) { console.error('Failed to stop user on traffic limit:', e.message); }
+            }
+          }
+        }
       }
 
       // Auto traffic reset check
@@ -499,12 +518,15 @@ async function recordHistory() {
 }
 
 async function cleanExpiredUsers() {
+  // NOTE: do NOT use JOIN here — n.id/n.name/n.created_at overwrite u.id/u.name/u.created_at
   const expired = db.prepare(
-    "SELECT u.*, n.* FROM users u JOIN nodes n ON u.node_id=n.id WHERE u.expires_at IS NOT NULL AND u.expires_at < datetime('now')"
+    "SELECT * FROM users WHERE expires_at IS NOT NULL AND expires_at < datetime('now')"
   ).all();
   for (const u of expired) {
+    const node = db.prepare('SELECT * FROM nodes WHERE id=?').get(u.node_id);
+    if (!node) { db.prepare('DELETE FROM users WHERE id=?').run(u.id); continue; }
     try {
-      await ssh.removeRemoteUser(db.prepare('SELECT * FROM nodes WHERE id=?').get(u.node_id), u.name);
+      await ssh.removeRemoteUser(node, u.name);
       db.prepare('DELETE FROM users WHERE id=?').run(u.id);
       console.log(`🗑️ Auto-deleted expired user: ${u.name} on node ${u.node_id}`);
     } catch (e) { console.error(`Failed to delete expired user ${u.name}:`, e.message); }
