@@ -151,11 +151,9 @@ app.post('/api/nodes', async (req, res) => {
     const cmd = [
       `mkdir -p /opt/mtg-agent && cd /opt/mtg-agent`,
       `wget -q "${RAW}/main.py" -O main.py || curl -fsSL "${RAW}/main.py" -o main.py`,
-      `wget -q "${RAW}/Dockerfile" -O Dockerfile || curl -fsSL "${RAW}/Dockerfile" -o Dockerfile`,
       `wget -q "${RAW}/docker-compose.yml" -O docker-compose.yml || curl -fsSL "${RAW}/docker-compose.yml" -o docker-compose.yml`,
       `echo "AGENT_TOKEN=${token}" > .env`,
       `docker compose down 2>/dev/null || true`,
-      `docker compose build --no-cache`,
       `docker compose up -d`,
       `echo "==> Done"`
     ].join(' && ');
@@ -210,11 +208,9 @@ app.post('/api/nodes/:id/update-agent', async (req, res) => {
   const cmd = [
     `mkdir -p /opt/mtg-agent && cd /opt/mtg-agent`,
     `wget -q "${RAW}/main.py" -O main.py`,
-    `wget -q "${RAW}/Dockerfile" -O Dockerfile`,
     `wget -q "${RAW}/docker-compose.yml" -O docker-compose.yml`,
     `echo "AGENT_TOKEN=${token}" > .env`,
     `docker compose down 2>/dev/null || true`,
-    `docker compose build --no-cache`,
     `docker compose up -d`,
     `echo "==> Done"`
   ].join(' && ');
@@ -333,6 +329,8 @@ app.get('/api/nodes/:id/users', async (req, res) => {
     connections: remote ? remote.connections : 0,
     running: remote ? !remote.status.includes('stopped') : false,
     is_online: remote ? (remote.connections || 0) > 0 : false,
+    traffic_rx: remote?.traffic?.rx || null,
+    traffic_tx: remote?.traffic?.tx || null,
     link: `tg://proxy?server=${node.host}&port=${u.port}&secret=${u.secret}`,
     expired: u.expires_at ? new Date(u.expires_at) < new Date() : false,
   });

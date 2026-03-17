@@ -210,7 +210,7 @@ def health():
 @app.get("/metrics")
 async def metrics(x_agent_token: str = Header(default="")):
     auth(x_agent_token)
-    await asyncio.wait_for(_cache_ready.wait(), timeout=30)
+    # Return immediately — never block. Empty list on cold start, cached data otherwise.
     containers = _cached_containers()
     return JSONResponse({
         "containers": [
@@ -233,7 +233,7 @@ async def metrics(x_agent_token: str = Header(default="")):
 @app.get("/users")
 async def list_users(x_agent_token: str = Header(default="")):
     auth(x_agent_token)
-    await asyncio.wait_for(_cache_ready.wait(), timeout=30)
+    # Return immediately — never block. Empty list on cold start, cached data otherwise.
     return JSONResponse(_cached_containers())
 
 

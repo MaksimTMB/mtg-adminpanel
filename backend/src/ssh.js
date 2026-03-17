@@ -137,7 +137,9 @@ async function getRemoteUsers(node) {
           port:        u.port,
           secret:      u.secret,
           status:      u.running ? 'Up' : 'stopped',
+          running:     u.running || false,
           connections: u.connections || 0,
+          traffic:     u.traffic   || null,
           via_agent:   true,
         }));
       }

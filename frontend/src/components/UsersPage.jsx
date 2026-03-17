@@ -21,12 +21,17 @@ export default function UsersPage({ node, onBack }) {
 
   const loadUsers = useCallback(async (silent = false) => {
     if (silent) setRef(true); else setLoading(true);
-    try { const u = await api('GET', `/api/nodes/${node.id}/users`); setUsers(u); }
+    try {
+      const u = await api('GET', `/api/nodes/${node.id}/users`);
+      setUsers(u);
+      // traffic_rx/tx now included per-user — build the traffic map from response
+      const t = {};
+      for (const user of u) {
+        if (user.traffic_rx) t[user.name] = { rx: user.traffic_rx, tx: user.traffic_tx || '—' };
+      }
+      setTraffic(t);
+    }
     finally { setLoading(false); setRef(false); }
-  }, [node.id]);
-
-  const loadTraffic = useCallback(async () => {
-    try { const t = await api('GET', `/api/nodes/${node.id}/traffic`); setTraffic(t || {}); } catch {}
   }, [node.id]);
 
   const syncUsers = async () => {
@@ -37,11 +42,12 @@ export default function UsersPage({ node, onBack }) {
     } catch(e) { toast(e.message, 'error'); }
   };
 
-  useEffect(() => { loadUsers(); loadTraffic(); }, [loadUsers, loadTraffic]);
+  // Single polling interval — users endpoint now includes traffic
+  useEffect(() => { loadUsers(); }, [loadUsers]);
   useEffect(() => {
-    const t = setInterval(() => loadTraffic(), 30000);
+    const t = setInterval(() => loadUsers(true), 30000);
     return () => clearInterval(t);
-  }, [loadTraffic]);
+  }, [loadUsers]);
 
   const setBusyFor = (n, v) => setBusy(b => ({...b, [n]: v}));
 

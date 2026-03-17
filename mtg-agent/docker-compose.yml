@@ -1,7 +1,6 @@
 services:
   mtg-agent:
-    build: .
-    image: mtg-agent:local
+    image: python:3.12-alpine
     container_name: mtg-agent
     restart: unless-stopped
     network_mode: host
@@ -13,7 +12,14 @@ services:
       - /usr/bin/docker:/usr/bin/docker:ro          # docker CLI для compose
       - /usr/libexec/docker:/usr/libexec/docker:ro  # docker compose plugin
       - ./main.py:/app/main.py:ro
+      - mtg_pip:/pip                               # кэш пакетов — pip install только 1 раз!
     working_dir: /app
     environment:
       - AGENT_TOKEN=${AGENT_TOKEN:-mtg-agent-secret}
       - START_PORT=${START_PORT:-4433}
+      - PYTHONPATH=/pip
+    # Проверяем наличие пакетов — если есть, пропускаем pip install (< 2 сек старт)
+    command: sh -c "python -c 'import fastapi,uvicorn,docker,pydantic' 2>/dev/null || pip install -q fastapi uvicorn docker pydantic -t /pip; python -m uvicorn main:app --host 0.0.0.0 --port 8081"
+
+volumes:
+  mtg_pip:    # named volume — сохраняется между docker compose down/up
