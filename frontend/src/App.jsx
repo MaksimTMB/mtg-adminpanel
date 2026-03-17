@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api, getToken, setToken, setTotpCode, setTotpRequiredHandler } from './api.js';
 import { useToast, Toasts } from './toast.jsx';
+import { flagUrl } from './utils.jsx';
 import Login from './components/Login.jsx';
 import Dashboard from './components/Dashboard.jsx';
 import NodesPage from './components/NodesPage.jsx';
@@ -137,10 +138,29 @@ export default function App() {
         <nav className="nav">
           <div className="nav-section">Навигация</div>
           {NAV.map(item => (
-            <div key={item.id}
-              className={`nav-item ${(page === item.id || (page === 'node' && item.id === 'nodes')) ? 'active' : ''}`}
-              onClick={() => nav(item.id)}>
-              {item.icon}{item.label}
+            <div key={item.id}>
+              <div
+                className={`nav-item ${(page === item.id || (page === 'node' && item.id === 'nodes') || (page === 'users' && selNode && item.id === 'nodes')) ? 'active' : ''}`}
+                onClick={() => nav(item.id)}>
+                {item.icon}{item.label}
+              </div>
+              {/* Nodes sub-list with flags */}
+              {item.id === 'nodes' && nodes.length > 0 && (
+                <div style={{paddingLeft:6,marginTop:2,marginBottom:4}}>
+                  {nodes.map(n => (
+                    <div key={n.id}
+                      className={`nav-item ${selNode?.id === n.id ? 'active' : ''}`}
+                      style={{fontSize:12,gap:7,paddingLeft:22,paddingTop:5,paddingBottom:5,borderRadius:6}}
+                      onClick={e => { e.stopPropagation(); selectNode(n); }}>
+                      {n.flag
+                        ? <img src={flagUrl(n.flag,'w40')} alt={n.flag}
+                            style={{width:18,height:13,objectFit:'cover',borderRadius:2,flexShrink:0}}/>
+                        : <I.Server style={{width:12,height:12}}/>}
+                      <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{n.name}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </nav>

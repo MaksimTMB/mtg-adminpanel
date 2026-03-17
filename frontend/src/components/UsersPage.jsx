@@ -89,7 +89,7 @@ export default function UsersPage({ node, onBack }) {
       await api('POST', `/api/nodes/${node.id}/users/${user.name}/reset-traffic`);
       toast(`${user.name}: трафик сброшен`, 'success');
       loadUsers(true);
-      setTimeout(() => loadTraffic(), 1500);
+      setTimeout(() => loadUsers(true), 1500);
     } catch(e) { toast(e.message, 'error'); }
     finally { setBusyFor(user.name + '_reset', false); }
   };
