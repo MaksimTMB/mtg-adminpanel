@@ -151,9 +151,11 @@ app.post('/api/nodes', async (req, res) => {
     const cmd = [
       `mkdir -p /opt/mtg-agent && cd /opt/mtg-agent`,
       `wget -q "${RAW}/main.py" -O main.py || curl -fsSL "${RAW}/main.py" -o main.py`,
+      `wget -q "${RAW}/Dockerfile" -O Dockerfile || curl -fsSL "${RAW}/Dockerfile" -o Dockerfile`,
       `wget -q "${RAW}/docker-compose.yml" -O docker-compose.yml || curl -fsSL "${RAW}/docker-compose.yml" -o docker-compose.yml`,
       `echo "AGENT_TOKEN=${token}" > .env`,
       `docker compose down 2>/dev/null || true`,
+      `docker compose build --no-cache`,
       `docker compose up -d`,
       `echo "==> Done"`
     ].join(' && ');
@@ -204,14 +206,15 @@ app.post('/api/nodes/:id/update-agent', async (req, res) => {
   const node = db.prepare('SELECT * FROM nodes WHERE id = ?').get(req.params.id);
   if (!node) return res.status(404).json({ error: 'Not found' });
   const token = process.env.AGENT_TOKEN || 'mtg-agent-secret';
-  // Use wget (more universally available than curl), write to temp file
   const RAW = 'https://raw.githubusercontent.com/MaksimTMB/mtg-adminpanel/dev/mtg-agent';
   const cmd = [
     `mkdir -p /opt/mtg-agent && cd /opt/mtg-agent`,
     `wget -q "${RAW}/main.py" -O main.py`,
+    `wget -q "${RAW}/Dockerfile" -O Dockerfile`,
     `wget -q "${RAW}/docker-compose.yml" -O docker-compose.yml`,
     `echo "AGENT_TOKEN=${token}" > .env`,
     `docker compose down 2>/dev/null || true`,
+    `docker compose build --no-cache`,
     `docker compose up -d`,
     `echo "==> Done"`
   ].join(' && ');
@@ -236,6 +239,53 @@ app.get('/api/nodes/:id/traffic', async (req, res) => {
   if (!node) return res.status(404).json({ error: 'Not found' });
   try { res.json(await ssh.getTraffic(node)); }
   catch (_) { res.json({}); }
+});
+
+// Combined endpoint: one agent/SSH call returns online+users+traffic for NodePage
+app.get('/api/nodes/:id/summary', async (req, res) => {
+  const node = db.prepare('SELECT * FROM nodes WHERE id = ?').get(req.params.id);
+  if (!node) return res.status(404).json({ error: 'Not found' });
+
+  const [onlineResult, remoteUsers] = await Promise.allSettled([
+    ssh.checkNode(node),
+    ssh.getRemoteUsers(node),
+  ]);
+  const online = onlineResult.status === 'fulfilled' ? onlineResult.value : false;
+  const remote = remoteUsers.status === 'fulfilled' ? remoteUsers.value : [];
+
+  // Build traffic map from remote users (already have traffic via agent cache)
+  const traffic = {};
+  for (const u of remote) {
+    if (u.traffic) traffic[u.name] = { rx: u.traffic.rx || '—', tx: u.traffic.tx || '—' };
+  }
+
+  const dbUsers = db.prepare('SELECT * FROM users WHERE node_id = ?').all(node.id);
+  function mkUser(u, r) {
+    return {
+      ...u,
+      port:        r?.port        || u.port,
+      secret:      r?.secret      || u.secret,
+      running:     r ? r.status === 'Up' || r.running === true : false,
+      connections: r?.connections || 0,
+      is_online:   (r?.connections || 0) > 0,
+      traffic:     r?.traffic     || null,
+    };
+  }
+  const users = dbUsers.map(u => mkUser(u, remote.find(r => r.name === u.name)));
+  res.json({ online, users, traffic });
+});
+
+// Agent version via /health (fast — no SSH needed)
+app.get('/api/nodes/:id/agent-version', async (req, res) => {
+  const node = db.prepare('SELECT * FROM nodes WHERE id = ?').get(req.params.id);
+  if (!node) return res.status(404).json({ error: 'Not found' });
+  if (!node.agent_port) return res.json({ version: null, available: false });
+  try {
+    const data = await ssh.agentGetPublic(node, '/health');
+    res.json({ version: data.version || 'unknown', available: true, cached_at: data.cached_at });
+  } catch (e) {
+    res.json({ version: null, available: false, error: e.message });
+  }
 });
 
 app.get('/api/nodes/:id/mtg-version', async (req, res) => {

@@ -16,6 +16,7 @@ function parseVer(raw) {
 
 export default function VersionBlock({ nodes, panelVersion }) {
   const [versions, setVersions]             = useState({});
+  const [agentVersions, setAgentVersions]   = useState({});
   const [updating, setUpdating]             = useState({});
   const [checking, setChecking]             = useState(false);
   const [open, setOpen]                     = useState(false);
@@ -27,8 +28,18 @@ export default function VersionBlock({ nodes, panelVersion }) {
     setChecking(true);
     await Promise.allSettled(nodes.map(async n => {
       try {
-        const r = await api('GET', `/api/nodes/${n.id}/mtg-version`);
-        setVersions(v => ({...v, [n.id]: r.version || 'unknown'}));
+        const [mtg, agent] = await Promise.allSettled([
+          api('GET', `/api/nodes/${n.id}/mtg-version`),
+          api('GET', `/api/nodes/${n.id}/agent-version`),
+        ]);
+        if (mtg.status === 'fulfilled')
+          setVersions(v => ({...v, [n.id]: mtg.value.version || 'unknown'}));
+        else
+          setVersions(v => ({...v, [n.id]: 'error'}));
+        if (agent.status === 'fulfilled' && agent.value.available)
+          setAgentVersions(v => ({...v, [n.id]: agent.value.version || 'unknown'}));
+        else
+          setAgentVersions(v => ({...v, [n.id]: null}));
       } catch {
         setVersions(v => ({...v, [n.id]: 'error'}));
       }
@@ -132,18 +143,20 @@ export default function VersionBlock({ nodes, panelVersion }) {
               </div>
               <table className="ver-table" style={{tableLayout:'fixed',width:'100%'}}>
                 <colgroup>
-                  <col style={{width:'20%'}}/>
-                  <col style={{width:'27%'}}/>
-                  <col style={{width:'15%'}}/>
-                  <col style={{width:'22%'}}/>
-                  <col style={{width:'16%'}}/>
+                  <col style={{width:'18%'}}/>
+                  <col style={{width:'23%'}}/>
+                  <col style={{width:'13%'}}/>
+                  <col style={{width:'18%'}}/>
+                  <col style={{width:'14%'}}/>
+                  <col style={{width:'14%'}}/>
                 </colgroup>
                 <thead>
                   <tr>
                     <th>Нода</th>
                     <th>Host</th>
-                    <th>Образ</th>
+                    <th>MTG образ</th>
                     <th>Собран</th>
+                    <th>Агент</th>
                     <th style={{textAlign:'right'}}>Обновить</th>
                   </tr>
                 </thead>
@@ -151,6 +164,7 @@ export default function VersionBlock({ nodes, panelVersion }) {
                   {nodes.map(n => {
                     const raw    = versions[n.id];
                     const parsed = raw ? parseVer(raw) : null;
+                    const agentV = agentVersions[n.id];
                     const upd    = updating[n.id];
                     return (
                       <tr key={n.id}>
@@ -167,6 +181,16 @@ export default function VersionBlock({ nodes, panelVersion }) {
                           }
                         </td>
                         <td style={{fontSize:11,color:'var(--t2)'}}>{parsed?.date || '—'}</td>
+                        <td>
+                          {checking && agentV === undefined
+                            ? <span style={{color:'var(--t3)',fontSize:11}}>...</span>
+                            : agentV
+                              ? <span className="badge badge-green" style={{fontFamily:'var(--mono)',fontSize:10}}>v{agentV}</span>
+                              : n.agent_port
+                                ? <span className="badge badge-red" style={{fontSize:10}}>офлайн</span>
+                                : <span style={{color:'var(--t3)',fontSize:11}}>—</span>
+                          }
+                        </td>
                         <td style={{textAlign:'right'}}>
                           <button className="btn btn-ghost btn-sm" onClick={() => updateNode(n)}
                             disabled={upd || !raw || raw === 'error'}

@@ -15,14 +15,11 @@ export default function NodePage({ node, onBack, onManage, onReload }) {
 
   const loadData = useCallback(async () => {
     try {
-      const [st, u, tr] = await Promise.allSettled([
-        api('GET', `/api/nodes/${node.id}/check`),
-        api('GET', `/api/nodes/${node.id}/users`),
-        api('GET', `/api/nodes/${node.id}/traffic`),
-      ]);
-      if (st.status === 'fulfilled') setStatus(st.value);
-      if (u.status  === 'fulfilled') setUsers(u.value || []);
-      if (tr.status === 'fulfilled') setTraffic(tr.value || {});
+      // One request instead of three — backend makes single agent call
+      const s = await api('GET', `/api/nodes/${node.id}/summary`);
+      setStatus({ online: s.online });
+      setUsers(s.users || []);
+      setTraffic(s.traffic || {});
     } catch {} finally { setLoading(false); }
   }, [node.id]);
 

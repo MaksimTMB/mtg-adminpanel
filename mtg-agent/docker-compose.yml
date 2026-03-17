@@ -1,6 +1,7 @@
 services:
   mtg-agent:
-    image: python:3.12-alpine
+    build: .
+    image: mtg-agent:local
     container_name: mtg-agent
     restart: unless-stopped
     network_mode: host
@@ -16,4 +17,3 @@ services:
     environment:
       - AGENT_TOKEN=${AGENT_TOKEN:-mtg-agent-secret}
       - START_PORT=${START_PORT:-4433}
-    command: sh -c "pip install --quiet fastapi uvicorn docker pydantic && uvicorn main:app --host 0.0.0.0 --port 8081"

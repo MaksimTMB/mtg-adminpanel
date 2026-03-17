@@ -24,7 +24,7 @@ function agentRequest(host, port, path, method = 'GET', body = null) {
         catch { reject(new Error('Invalid JSON from agent')); }
       });
     });
-    req.setTimeout(15000, () => { req.destroy(); reject(new Error('Agent timeout')); });
+    req.setTimeout(4000, () => { req.destroy(); reject(new Error('Agent timeout')); });
     req.on('error', reject);
     if (payload) req.write(payload);
     req.end();
@@ -185,23 +185,8 @@ async function getTraffic(node) {
       }
     } catch {}
   }
-  // SSH fallback
-  try {
-    const r = await sshExec(node,
-      "docker stats --no-stream --format '{{.Name}}|{{.NetIO}}' 2>/dev/null | grep '^mtg-' | grep -v 'mtg-agent'"
-    );
-    const result = {};
-    for (const line of r.output.split('\n')) {
-      if (!line.includes('|')) continue;
-      const [name, netio] = line.split('|');
-      const userName = name.replace('mtg-', '').trim();
-      const parts = netio.trim().split(' / ');
-      result[userName] = { rx: parts[0] || '0B', tx: parts[1] || '0B' };
-    }
-    return result;
-  } catch {
-    return {};
-  }
+  // SSH fallback: docker stats is too slow (~2s per container), skip it
+  return {};
 }
 
 async function createRemoteUser(node, name) {
@@ -300,6 +285,7 @@ async function restartRemoteUser(node, name) {
 
 module.exports = {
   sshExec, checkNode, checkAgentHealth,
+  agentGetPublic: agentGet,
   getNodeStatus, getRemoteUsers, getTraffic,
   createRemoteUser, removeRemoteUser, stopRemoteUser, startRemoteUser, restartRemoteUser,
 };
