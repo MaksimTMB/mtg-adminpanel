@@ -40,13 +40,14 @@ def auth(token: str):
 
 # ── Docker low-level helpers ──────────────────────────────
 def _get_mtg_containers():
+    """Return list of mtg-* containers via SDK, or None if SDK unavailable/failed."""
     if not dclient:
-        return []
+        return None
     try:
         return [c for c in dclient.containers.list(all=True)
                 if c.name.startswith("mtg-") and c.name != "mtg-agent"]
     except Exception:
-        return []
+        return None  # SDK failed — caller must use CLI fallback
 
 
 def _container_running_cli(name: str) -> bool:
@@ -122,8 +123,9 @@ def _read_config(user_dir: Path) -> dict:
 def _compute_all() -> list:
     """Compute full metrics for all containers. Slow (Docker stats). Run in background."""
     BASE_DIR.mkdir(parents=True, exist_ok=True)
-    containers = _get_mtg_containers()
-    by_name = {c.name: c for c in containers}
+    containers = _get_mtg_containers()   # None means SDK failed → use CLI fallback
+    sdk_ok = containers is not None
+    by_name = {c.name: c for c in (containers or [])}
     result = []
 
     for user_dir in sorted(BASE_DIR.iterdir()):
@@ -134,10 +136,10 @@ def _compute_all() -> list:
         c        = by_name.get(f"mtg-{name}")
         if c is not None:
             running = c.status == "running"
-        elif dclient:
-            running = False  # SDK available but container not found → truly stopped
+        elif sdk_ok:
+            running = False  # SDK works, container genuinely not found → stopped
         else:
-            running = _container_running_cli(f"mtg-{name}")  # SDK unavailable → CLI fallback
+            running = _container_running_cli(f"mtg-{name}")  # SDK failed → CLI fallback
         devices  = _connections(c) if (running and c is not None) else 0
         traffic  = _traffic(c)     if (running and c is not None) else {"rx": "—", "tx": "—", "rx_bytes": 0, "tx_bytes": 0}
         result.append({
@@ -170,8 +172,9 @@ async def _refresh_loop():
 
 @app.on_event("startup")
 async def startup():
-    # Populate cache immediately so first request isn't empty
-    await _refresh_once()
+    # Start refresh loop — first iteration runs immediately (no initial sleep).
+    # Do NOT await here: that would block the ASGI lifespan and prevent the agent
+    # from accepting requests until _compute_all() finishes (can be 30+ seconds).
     asyncio.create_task(_refresh_loop())
 
 
@@ -321,10 +324,10 @@ async def start_user(name: str, x_agent_token: str = Header(default="")):
             asyncio.create_task(_refresh_once())
             return JSONResponse({"ok": True})
         except docker.errors.NotFound:
-            pass  # container missing — fall through to compose up
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
-    # Fallback: compose up -d recreates container if needed
+            pass  # container missing — fall through to compose up -d
+        except Exception:
+            pass  # SDK error — fall through to CLI fallback
+    # CLI fallback: compose up -d recreates container if needed
     r = subprocess.run(["docker", "compose", "up", "-d"],
                        cwd=str(user_dir), capture_output=True)
     if r.returncode != 0:
@@ -350,8 +353,8 @@ async def stop_user(name: str, x_agent_token: str = Header(default="")):
             return JSONResponse({"ok": True})
         except docker.errors.NotFound:
             pass
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        except Exception:
+            pass  # SDK error — fall through to CLI
     r = subprocess.run(["docker", "compose", "stop"],
                        cwd=str(user_dir), capture_output=True)
     if r.returncode != 0:
@@ -376,8 +379,8 @@ async def restart_user(name: str, x_agent_token: str = Header(default="")):
             return JSONResponse({"ok": True})
         except docker.errors.NotFound:
             pass
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        except Exception:
+            pass  # SDK error — fall through to CLI
     subprocess.run(["docker", "compose", "stop"], cwd=str(user_dir), capture_output=True)
     r = subprocess.run(["docker", "compose", "up", "-d"],
                        cwd=str(user_dir), capture_output=True)
