@@ -271,7 +271,7 @@ async function startRemoteUser(node, name) {
       if (e.message.includes('not found') || e.message.includes('404')) throw e;
     }
   }
-  await sshExec(node, 'cd ' + node.base_dir + '/' + name + ' && docker compose start 2>/dev/null');
+  await sshExec(node, 'cd ' + node.base_dir + '/' + name + ' && docker compose up -d 2>/dev/null');
 }
 
 async function restartRemoteUser(node, name) {
@@ -283,7 +283,7 @@ async function restartRemoteUser(node, name) {
       if (e.message.includes('not found') || e.message.includes('404')) throw e;
     }
   }
-  await sshExec(node, `cd ${node.base_dir}/${name} && docker compose stop 2>/dev/null && docker compose start 2>/dev/null`);
+  await sshExec(node, `cd ${node.base_dir}/${name} && docker compose stop 2>/dev/null; docker compose up -d 2>/dev/null`);
 }
 
 module.exports = {

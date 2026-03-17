@@ -154,6 +154,8 @@ async def _refresh_loop():
 
 @app.on_event("startup")
 async def startup():
+    # Populate cache immediately so first request isn't empty
+    await _refresh_once()
     asyncio.create_task(_refresh_loop())
 
 
@@ -274,6 +276,20 @@ async def delete_user(name: str, x_agent_token: str = Header(default="")):
     return JSONResponse({"ok": True})
 
 
+def _cache_set_status(name: str, running: bool):
+    """Immediately patch running status in cache without waiting for full refresh."""
+    containers = list(_cache.get("containers", []))
+    for item in containers:
+        if item["name"] == name:
+            item["running"] = running
+            item["status"] = "running" if running else "stopped"
+            if not running:
+                item["connections"] = 0
+                item["is_online"] = False
+            break
+    _cache["containers"] = containers
+
+
 @app.post("/users/{name}/start")
 async def start_user(name: str, x_agent_token: str = Header(default="")):
     auth(x_agent_token)
@@ -285,13 +301,19 @@ async def start_user(name: str, x_agent_token: str = Header(default="")):
             c = dclient.containers.get(f"mtg-{name}")
             if c.status != "running":
                 c.start()
+            _cache_set_status(name, True)
             asyncio.create_task(_refresh_once())
             return JSONResponse({"ok": True})
         except docker.errors.NotFound:
-            pass  # container missing — fall through to compose
+            pass  # container missing — fall through to compose up
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
-    _dc(user_dir, "up", "-d")
+    # Fallback: compose up -d recreates container if needed
+    r = subprocess.run(["docker", "compose", "up", "-d"],
+                       cwd=str(user_dir), capture_output=True)
+    if r.returncode != 0:
+        raise HTTPException(status_code=500, detail=r.stderr.decode())
+    _cache_set_status(name, True)
     asyncio.create_task(_refresh_once())
     return JSONResponse({"ok": True})
 
@@ -307,13 +329,18 @@ async def stop_user(name: str, x_agent_token: str = Header(default="")):
             c = dclient.containers.get(f"mtg-{name}")
             if c.status == "running":
                 c.stop(timeout=5)
+            _cache_set_status(name, False)
             asyncio.create_task(_refresh_once())
             return JSONResponse({"ok": True})
         except docker.errors.NotFound:
             pass
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
-    _dc(user_dir, "stop")
+    r = subprocess.run(["docker", "compose", "stop"],
+                       cwd=str(user_dir), capture_output=True)
+    if r.returncode != 0:
+        raise HTTPException(status_code=500, detail=r.stderr.decode())
+    _cache_set_status(name, False)
     asyncio.create_task(_refresh_once())
     return JSONResponse({"ok": True})
 
@@ -328,14 +355,19 @@ async def restart_user(name: str, x_agent_token: str = Header(default="")):
         try:
             c = dclient.containers.get(f"mtg-{name}")
             c.restart(timeout=5)
+            _cache_set_status(name, True)
             asyncio.create_task(_refresh_once())
             return JSONResponse({"ok": True})
         except docker.errors.NotFound:
             pass
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
-    _dc(user_dir, "stop")
-    _dc(user_dir, "start")
+    subprocess.run(["docker", "compose", "stop"], cwd=str(user_dir), capture_output=True)
+    r = subprocess.run(["docker", "compose", "up", "-d"],
+                       cwd=str(user_dir), capture_output=True)
+    if r.returncode != 0:
+        raise HTTPException(status_code=500, detail=r.stderr.decode())
+    _cache_set_status(name, True)
     asyncio.create_task(_refresh_once())
     return JSONResponse({"ok": True})
 
