@@ -280,15 +280,18 @@ async def start_user(name: str, x_agent_token: str = Header(default="")):
     user_dir = BASE_DIR / name
     if not user_dir.exists():
         raise HTTPException(status_code=404, detail="User not found")
-    try:
-        c = dclient.containers.get(f"mtg-{name}")
-        if c.status != "running":
-            c.start()
-    except docker.errors.NotFound:
-        # Container doesn't exist yet — bring it up via compose
-        _dc(user_dir, "up", "-d")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    if dclient:
+        try:
+            c = dclient.containers.get(f"mtg-{name}")
+            if c.status != "running":
+                c.start()
+            asyncio.create_task(_refresh_once())
+            return JSONResponse({"ok": True})
+        except docker.errors.NotFound:
+            pass  # container missing — fall through to compose
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    _dc(user_dir, "up", "-d")
     asyncio.create_task(_refresh_once())
     return JSONResponse({"ok": True})
 
@@ -299,14 +302,18 @@ async def stop_user(name: str, x_agent_token: str = Header(default="")):
     user_dir = BASE_DIR / name
     if not user_dir.exists():
         raise HTTPException(status_code=404, detail="User not found")
-    try:
-        c = dclient.containers.get(f"mtg-{name}")
-        if c.status == "running":
-            c.stop(timeout=5)
-    except docker.errors.NotFound:
-        pass  # already gone
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    if dclient:
+        try:
+            c = dclient.containers.get(f"mtg-{name}")
+            if c.status == "running":
+                c.stop(timeout=5)
+            asyncio.create_task(_refresh_once())
+            return JSONResponse({"ok": True})
+        except docker.errors.NotFound:
+            pass
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    _dc(user_dir, "stop")
     asyncio.create_task(_refresh_once())
     return JSONResponse({"ok": True})
 
@@ -317,13 +324,18 @@ async def restart_user(name: str, x_agent_token: str = Header(default="")):
     user_dir = BASE_DIR / name
     if not user_dir.exists():
         raise HTTPException(status_code=404, detail="User not found")
-    try:
-        c = dclient.containers.get(f"mtg-{name}")
-        c.restart(timeout=5)
-    except docker.errors.NotFound:
-        _dc(user_dir, "up", "-d")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    if dclient:
+        try:
+            c = dclient.containers.get(f"mtg-{name}")
+            c.restart(timeout=5)
+            asyncio.create_task(_refresh_once())
+            return JSONResponse({"ok": True})
+        except docker.errors.NotFound:
+            pass
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    _dc(user_dir, "stop")
+    _dc(user_dir, "start")
     asyncio.create_task(_refresh_once())
     return JSONResponse({"ok": True})
 

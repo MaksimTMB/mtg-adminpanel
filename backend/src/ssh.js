@@ -255,7 +255,8 @@ async function stopRemoteUser(node, name) {
       await agentPost(node, `/users/${name}/stop`);
       return;
     } catch (e) {
-      if (!e.message.includes('timeout') && !e.message.includes('ECONNREFUSED')) throw e;
+      // Only give up on agent if it's clearly unreachable — otherwise fall through to SSH
+      if (e.message.includes('not found') || e.message.includes('404')) throw e;
     }
   }
   await sshExec(node, 'cd ' + node.base_dir + '/' + name + ' && docker compose stop 2>/dev/null');
@@ -267,7 +268,7 @@ async function startRemoteUser(node, name) {
       await agentPost(node, `/users/${name}/start`);
       return;
     } catch (e) {
-      if (!e.message.includes('timeout') && !e.message.includes('ECONNREFUSED')) throw e;
+      if (e.message.includes('not found') || e.message.includes('404')) throw e;
     }
   }
   await sshExec(node, 'cd ' + node.base_dir + '/' + name + ' && docker compose start 2>/dev/null');
@@ -279,7 +280,7 @@ async function restartRemoteUser(node, name) {
       await agentPost(node, `/users/${name}/restart`);
       return;
     } catch (e) {
-      if (!e.message.includes('timeout') && !e.message.includes('ECONNREFUSED')) throw e;
+      if (e.message.includes('not found') || e.message.includes('404')) throw e;
     }
   }
   await sshExec(node, `cd ${node.base_dir}/${name} && docker compose stop 2>/dev/null && docker compose start 2>/dev/null`);
