@@ -20,14 +20,17 @@ export default function UsersPage({ node, onBack }) {
   const [traffic, setTraffic] = useState({});
 
   const loadUsers = useCallback(async (silent = false) => {
-    if (silent) setRef(true); else setLoading(true);
+    if (!silent) setLoading(true); else setRef(true);
     try {
       const u = await api('GET', `/api/nodes/${node.id}/users`);
       setUsers(u);
-      // traffic_rx/tx now included per-user — build the traffic map from response
+      // Build traffic map: prefer live data, fall back to DB snapshot
       const t = {};
       for (const user of u) {
-        if (user.traffic_rx) t[user.name] = { rx: user.traffic_rx, tx: user.traffic_tx || '—' };
+        if (user.traffic_rx)
+          t[user.name] = { rx: user.traffic_rx, tx: user.traffic_tx || '—', live: true };
+        else if (user.traffic_rx_snap)
+          t[user.name] = { rx: user.traffic_rx_snap, tx: user.traffic_tx_snap || '—', live: false };
       }
       setTraffic(t);
     }
@@ -113,60 +116,63 @@ export default function UsersPage({ node, onBack }) {
       </div>
 
       <div className="card">
-        {loading ? <div className="loading-center"><span className="spin"/> Загружаю юзеров...</div> : (
+        {loading ? <div className="loading-center"><span className="spin"/> Загружаю...</div> : (
           <div className="table-wrap">
             <table>
               <thead><tr>
                 <th>Клиент</th>
                 <th>Порт</th>
-                <th>Онлайн</th>
-                <th>Устройств</th>
-                <th>Трафик</th>
                 <th>Статус</th>
+                <th>Подключения</th>
+                <th>Трафик</th>
                 <th>Срок / Лимит</th>
                 <th>Заметка</th>
                 <th>Действия</th>
               </tr></thead>
               <tbody>
                 {users.map(u => {
-                  const traf = u.running
-                    ? traffic[u.name]
-                    : (u.traffic_rx_snap ? {rx: u.traffic_rx_snap, tx: u.traffic_tx_snap} : traffic[u.name]);
+                  // live data preferred, snapshot as fallback
+                  const traf    = traffic[u.name] || null;
                   const devLimit = u.max_devices;
                   const devOver  = devLimit && u.connections > devLimit;
                   return (
                     <tr key={u.id}>
                       <td><span style={{fontFamily:'var(--mono)',fontWeight:600,fontSize:14}}>{u.name}</span></td>
                       <td><span className="badge badge-purple">{u.port}</span></td>
+
+                      {/* Статус: running/stopped + expired */}
+                      <td>
+                        <div style={{display:'flex',flexDirection:'column',gap:3,alignItems:'flex-start'}}>
+                          <span className={`badge ${u.running ? 'badge-green' : 'badge-red'}`}>
+                            <span className={`dot ${u.running ? 'dot-live' : ''}`}/>
+                            {u.running ? 'активен' : 'стоп'}
+                          </span>
+                          {u.expired && <span className="badge badge-amber">истёк</span>}
+                        </div>
+                      </td>
+
+                      {/* Подключения: онлайн-бейдж с количеством устройств */}
                       <td>
                         {u.is_online
-                          ? <span className="badge badge-green"><span className="dot dot-live"/>online</span>
-                          : <span style={{color:'var(--t3)',fontSize:12}}>—</span>}
+                          ? <span
+                              className={`badge ${devOver ? 'badge-red' : 'badge-green'}`}
+                              title={devLimit ? `Лимит: ${devLimit} устройств` : 'Без ограничений'}
+                            >
+                              <span className="dot dot-live"/>
+                              {u.connections} онлайн{devLimit ? ` / ${devLimit}` : ''}
+                            </span>
+                          : <span style={{color:'var(--t3)',fontSize:12}}>офлайн</span>}
                       </td>
-                      <td>
-                        <span style={{fontFamily:'var(--mono)',fontWeight:500,fontSize:14,
-                          color: devOver ? 'var(--re)' : u.connections > 0 ? 'var(--vi)' : 'var(--t3)'}}
-                          title={devLimit ? `Лимит: ${devLimit} устройств` : 'Без ограничений'}>
-                          {u.connections}{devLimit ? `/${devLimit}` : ''}
-                        </span>
-                      </td>
+
+                      {/* Трафик: live или snapshot */}
                       <td>
                         {traf
                           ? <span className="traf">
                               <span className="rx">↓{traf.rx}</span>
                               <span className="tx"> ↑{traf.tx}</span>
-                              {!u.running && u.traffic_rx_snap && <span style={{fontSize:10,color:'var(--t3)',marginLeft:4}} title="Снапшот на момент паузы">⏸</span>}
+                              {!traf.live && <span style={{fontSize:10,color:'var(--t3)',marginLeft:4}} title="Данные на момент остановки">⏸</span>}
                             </span>
                           : <span style={{color:'var(--t3)',fontSize:12}}>—</span>}
-                      </td>
-                      <td>
-                        <div style={{display:'flex',flexDirection:'column',gap:3,alignItems:'flex-start'}}>
-                          <span className={`badge ${u.running ? 'badge-green' : 'badge-red'}`}>
-                            <span className={`dot ${u.running ? 'dot-live' : ''}`}/>
-                            {u.running ? 'active' : 'stopped'}
-                          </span>
-                          {u.expired && <span className="badge badge-amber">истёк</span>}
-                        </div>
                       </td>
                       <td>
                         <div style={{display:'flex',flexDirection:'column',gap:3}}>
