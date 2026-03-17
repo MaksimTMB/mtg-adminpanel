@@ -71,14 +71,16 @@ app.use('/api', (req, res, next) => {
 // ── TOTP 2FA ──────────────────────────────────────────────
 const TOTP_ISSUER = 'MTG Panel';
 
-function getTotpSecret() {
-  const row = db.prepare("SELECT value FROM settings WHERE key='totp_secret'").get();
-  return row ? row.value : null;
+// In-memory TOTP cache — avoids a DB hit on every API request
+let _totpCache = null;
+function _loadTotpCache() {
+  const secret  = db.prepare("SELECT value FROM settings WHERE key='totp_secret'").get();
+  const enabled = db.prepare("SELECT value FROM settings WHERE key='totp_enabled'").get();
+  _totpCache = { secret: secret ? secret.value : null, enabled: enabled && enabled.value === '1' };
 }
-function isTotpEnabled() {
-  const row = db.prepare("SELECT value FROM settings WHERE key='totp_enabled'").get();
-  return row && row.value === '1';
-}
+function _invalidateTotpCache() { _totpCache = null; }
+function getTotpSecret()  { if (!_totpCache) _loadTotpCache(); return _totpCache.secret; }
+function isTotpEnabled()  { if (!_totpCache) _loadTotpCache(); return _totpCache.enabled; }
 
 app.get('/api/totp/status', (req, res) => {
   const token = req.headers['x-auth-token'];
@@ -91,6 +93,7 @@ app.post('/api/totp/setup', async (req, res) => {
   const secret = authenticator.generateSecret();
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('totp_secret', ?)").run(secret);
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('totp_enabled', '0')").run();
+  _invalidateTotpCache();
   res.json({ secret, qr: authenticator.keyuri('admin', TOTP_ISSUER, secret) });
 });
 app.post('/api/totp/verify', (req, res) => {
@@ -101,6 +104,7 @@ app.post('/api/totp/verify', (req, res) => {
   if (!secret) return res.status(400).json({ error: 'Setup first' });
   if (authenticator.verify(code, secret)) {
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('totp_enabled', '1')").run();
+    _invalidateTotpCache();
     res.json({ ok: true });
   } else { res.status(400).json({ error: 'Invalid code' }); }
 });
@@ -113,6 +117,7 @@ app.post('/api/totp/disable', (req, res) => {
     return res.status(400).json({ error: 'Invalid code' });
   }
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('totp_enabled', '0')").run();
+  _invalidateTotpCache();
   res.json({ ok: true });
 });
 
@@ -449,107 +454,118 @@ function parseBytes(str) {
 }
 
 // ── Background jobs ───────────────────────────────────────
-async function recordHistory() {
-  const nodes = db.prepare('SELECT * FROM nodes').all();
-  for (const node of nodes) {
-    try {
-      const remoteUsers = await ssh.getRemoteUsers(node);
-      const traffic = await ssh.getTraffic(node).catch(() => ({}));
 
-      for (const u of remoteUsers) {
-        const conns = u.connections || 0;
-        db.prepare('INSERT INTO connections_history (node_id, user_name, connections) VALUES (?, ?, ?)')
-          .run(node.id, u.name, conns);
+// Fetch a single node's data and enforce limits/resets.
+// All nodes run in parallel via Promise.allSettled in recordHistory().
+async function processNode(node) {
+  const remoteUsers = await ssh.getRemoteUsers(node);
+  const traffic = await ssh.getTraffic(node).catch(() => ({}));
+  // Pre-load all DB users for this node in one query
+  const dbUsers = db.prepare('SELECT * FROM users WHERE node_id=?').all(node.id);
+  const dbMap = Object.fromEntries(dbUsers.map(u => [u.name, u]));
 
-        if (conns > 0) {
-          db.prepare("UPDATE users SET last_seen_at=datetime('now') WHERE node_id=? AND name=?")
-            .run(node.id, u.name);
-        }
+  for (const u of remoteUsers) {
+    const conns  = u.connections || 0;
+    const dbUser = dbMap[u.name];
 
-        // Device limit enforcement
-        const dbUser = db.prepare('SELECT * FROM users WHERE node_id=? AND name=?').get(node.id, u.name);
-        if (dbUser && dbUser.max_devices && conns > dbUser.max_devices) {
-          console.log(`⚠️ Device limit exceeded: ${u.name} on node ${node.id} (${conns}/${dbUser.max_devices})`);
+    db.prepare('INSERT INTO connections_history (node_id, user_name, connections) VALUES (?, ?, ?)')
+      .run(node.id, u.name, conns);
+
+    if (conns > 0) {
+      db.prepare("UPDATE users SET last_seen_at=datetime('now') WHERE node_id=? AND name=?")
+        .run(node.id, u.name);
+    }
+
+    if (!dbUser) continue;
+
+    // Device limit enforcement
+    if (dbUser.max_devices && conns > dbUser.max_devices) {
+      console.log(`⚠️ Device limit: ${u.name}@${node.id} (${conns}/${dbUser.max_devices})`);
+      try {
+        await ssh.stopRemoteUser(node, u.name);
+        db.prepare('UPDATE users SET status=? WHERE node_id=? AND name=?').run('stopped', node.id, u.name);
+        console.log(`🛑 Stopped ${u.name}: device limit`);
+      } catch (e) { console.error(`Stop failed (device limit) ${u.name}:`, e.message); }
+    }
+
+    // Traffic limit enforcement
+    if (dbUser.traffic_limit_gb && dbUser.status !== 'stopped') {
+      const t = traffic[u.name];
+      if (t) {
+        const totalBytes = parseBytes(t.rx) + parseBytes(t.tx);
+        if (totalBytes >= dbUser.traffic_limit_gb * 1073741824) {
+          console.log(`⚠️ Traffic limit: ${u.name}@${node.id} (${(totalBytes/1073741824).toFixed(2)}/${dbUser.traffic_limit_gb}GB)`);
           try {
             await ssh.stopRemoteUser(node, u.name);
             db.prepare('UPDATE users SET status=? WHERE node_id=? AND name=?').run('stopped', node.id, u.name);
-            console.log(`🛑 Auto-stopped ${u.name}: exceeded device limit`);
-          } catch (e) { console.error('Failed to stop user:', e.message); }
-        }
-
-        // Traffic limit enforcement
-        if (dbUser && dbUser.traffic_limit_gb && dbUser.status !== 'stopped') {
-          const t = traffic[u.name];
-          if (t) {
-            const totalBytes = parseBytes(t.rx) + parseBytes(t.tx);
-            const limitBytes = dbUser.traffic_limit_gb * 1073741824;
-            if (totalBytes >= limitBytes) {
-              console.log(`⚠️ Traffic limit exceeded: ${u.name} on node ${node.id} (${(totalBytes/1073741824).toFixed(2)}GB / ${dbUser.traffic_limit_gb}GB)`);
-              try {
-                await ssh.stopRemoteUser(node, u.name);
-                db.prepare('UPDATE users SET status=? WHERE node_id=? AND name=?').run('stopped', node.id, u.name);
-                console.log(`🛑 Auto-stopped ${u.name}: exceeded traffic limit`);
-              } catch (e) { console.error('Failed to stop user on traffic limit:', e.message); }
-            }
-          }
+            console.log(`🛑 Stopped ${u.name}: traffic limit`);
+          } catch (e) { console.error(`Stop failed (traffic limit) ${u.name}:`, e.message); }
         }
       }
-
-      // Auto traffic reset check
-      const usersToReset = db.prepare(`
-        SELECT * FROM users WHERE node_id=? AND traffic_reset_interval IS NOT NULL
-        AND traffic_reset_interval != 'never' AND next_reset_at IS NOT NULL
-        AND next_reset_at <= datetime('now')
-      `).all(node.id);
-
-      for (const u of usersToReset) {
-        try {
-          // Accumulate total traffic before reset
-          const t = traffic[u.name];
-          if (t) {
-            const rxBytes = parseBytes(t.rx) + (u.total_traffic_rx_bytes || 0);
-            const txBytes = parseBytes(t.tx) + (u.total_traffic_tx_bytes || 0);
-            db.prepare('UPDATE users SET total_traffic_rx_bytes=?, total_traffic_tx_bytes=? WHERE id=?')
-              .run(rxBytes, txBytes, u.id);
-          }
-          // Reset traffic (restart container)
-          await ssh.stopRemoteUser(node, u.name);
-          await ssh.startRemoteUser(node, u.name);
-          const next = calcNextReset(u.traffic_reset_interval);
-          db.prepare(`UPDATE users SET traffic_reset_at=datetime('now'), traffic_rx_snap=NULL,
-            traffic_tx_snap=NULL, next_reset_at=?, status='active' WHERE id=?`).run(next, u.id);
-          console.log(`♻️ Auto-reset traffic for ${u.name} on node ${node.id}, next: ${next}`);
-        } catch (e) { console.error(`Failed to auto-reset traffic for ${u.name}:`, e.message); }
-      }
-
-    } catch (e) { console.error(`recordHistory error on node ${node.id}:`, e.message); }
+    }
   }
+
+  // Auto traffic reset
+  const usersToReset = db.prepare(`
+    SELECT * FROM users WHERE node_id=? AND traffic_reset_interval IS NOT NULL
+    AND traffic_reset_interval != 'never' AND next_reset_at IS NOT NULL
+    AND next_reset_at <= datetime('now')
+  `).all(node.id);
+
+  for (const u of usersToReset) {
+    try {
+      const t = traffic[u.name];
+      if (t) {
+        db.prepare('UPDATE users SET total_traffic_rx_bytes=?, total_traffic_tx_bytes=? WHERE id=?')
+          .run(parseBytes(t.rx) + (u.total_traffic_rx_bytes || 0),
+               parseBytes(t.tx) + (u.total_traffic_tx_bytes || 0), u.id);
+      }
+      await ssh.stopRemoteUser(node, u.name);
+      await ssh.startRemoteUser(node, u.name);
+      const next = calcNextReset(u.traffic_reset_interval);
+      db.prepare(`UPDATE users SET traffic_reset_at=datetime('now'), traffic_rx_snap=NULL,
+        traffic_tx_snap=NULL, next_reset_at=?, status='active' WHERE id=?`).run(next, u.id);
+      console.log(`♻️ Traffic reset ${u.name}@${node.id}, next: ${next}`);
+    } catch (e) { console.error(`Traffic reset failed ${u.name}:`, e.message); }
+  }
+}
+
+async function recordHistory() {
+  const nodes = db.prepare('SELECT * FROM nodes').all();
+  // Process all nodes in parallel
+  const results = await Promise.allSettled(nodes.map(n => processNode(n)));
+  results.forEach((r, i) => {
+    if (r.status === 'rejected')
+      console.error(`recordHistory error on node ${nodes[i].id}:`, r.reason?.message);
+  });
   db.prepare("DELETE FROM connections_history WHERE recorded_at < datetime('now', '-24 hours')").run();
 }
 
-async function cleanExpiredUsers() {
-  // NOTE: do NOT use JOIN here — n.id/n.name/n.created_at overwrite u.id/u.name/u.created_at
+// Stop expired users — never delete automatically, only an admin can delete a user
+async function stopExpiredUsers() {
+  // NOTE: do NOT use JOIN — n.* columns overwrite u.* columns
   const expired = db.prepare(
-    "SELECT * FROM users WHERE expires_at IS NOT NULL AND expires_at < datetime('now')"
+    "SELECT * FROM users WHERE expires_at IS NOT NULL AND expires_at < datetime('now') AND status != 'stopped'"
   ).all();
-  for (const u of expired) {
+  if (!expired.length) return;
+  await Promise.allSettled(expired.map(async u => {
     const node = db.prepare('SELECT * FROM nodes WHERE id=?').get(u.node_id);
-    if (!node) { db.prepare('DELETE FROM users WHERE id=?').run(u.id); continue; }
+    if (!node) return; // orphan user — leave it, admin will clean up
     try {
-      await ssh.removeRemoteUser(node, u.name);
-      db.prepare('DELETE FROM users WHERE id=?').run(u.id);
-      console.log(`🗑️ Auto-deleted expired user: ${u.name} on node ${u.node_id}`);
-    } catch (e) { console.error(`Failed to delete expired user ${u.name}:`, e.message); }
-  }
+      await ssh.stopRemoteUser(node, u.name);
+      db.prepare("UPDATE users SET status='stopped' WHERE id=?").run(u.id);
+      console.log(`🛑 Auto-stopped expired user: ${u.name}@${u.node_id}`);
+    } catch (e) { console.error(`Failed to stop expired user ${u.name}:`, e.message); }
+  }));
 }
 
-setInterval(recordHistory,     5  * 60 * 1000);
-setInterval(cleanExpiredUsers, 60  * 60 * 1000);
+setInterval(recordHistory,    5  * 60 * 1000);
+setInterval(stopExpiredUsers, 60  * 60 * 1000);
 
 app.listen(PORT, () => {
   console.log(`🔒 MTG Panel running on http://0.0.0.0:${PORT}`);
   console.log(`🔑 Auth token: ${AUTH_TOKEN}`);
   console.log(`📦 Version: ${pkgVersion}`);
-  setTimeout(recordHistory,     10000);
-  setTimeout(cleanExpiredUsers,  5000);
+  setTimeout(recordHistory,    10000);
+  setTimeout(stopExpiredUsers,  5000);
 });
