@@ -55,12 +55,14 @@ def _connections(container) -> int:
         pid = container.attrs.get("State", {}).get("Pid", 0)
         if not pid:
             return 0
-        try:
-            path = f"/proc/{pid}/net/tcp6"
-            lines = open(path).readlines()[1:]
-        except Exception:
-            path = f"/proc/{pid}/net/tcp"
-            lines = open(path).readlines()[1:]
+        # Read both tcp and tcp6 — MTG binds IPv4 (appears in tcp only),
+        # but some kernels/configs use dual-stack (appears in tcp6 as IPv4-mapped).
+        lines = []
+        for fname in ("tcp", "tcp6"):
+            try:
+                lines += open(f"/proc/{pid}/net/{fname}").readlines()[1:]
+            except Exception:
+                pass
         ips = set()
         for line in lines:
             parts = line.split()
