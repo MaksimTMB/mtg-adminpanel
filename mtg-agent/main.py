@@ -83,7 +83,11 @@ def _connections(container) -> int:
                 continue
             local_port = parts[1].split(":")[1] if ":" in parts[1] else ""
             if parts[3] == "01" and local_port == MTG_PORT_HEX:
-                ips.add(parts[2].rsplit(":", 1)[0])
+                ip = parts[2].rsplit(":", 1)[0]
+                # Normalize IPv4-mapped IPv6 (tcp6): last 8 hex chars = IPv4 addr
+                if len(ip) > 8:
+                    ip = ip[-8:]
+                ips.add(ip)
         return len(ips)
     except Exception:
         return 0
