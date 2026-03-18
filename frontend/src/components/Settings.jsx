@@ -65,7 +65,7 @@ export default function Settings() {
         </div>
 
         <p style={{fontSize:13,color:'var(--t3)',marginBottom:18}}>
-          Google Authenticator / любое TOTP-приложение
+          Google Authenticator, Aegis, Authy или любое TOTP-приложение
         </p>
 
         {step === 'idle' && (!enabled
@@ -78,7 +78,7 @@ export default function Settings() {
         {step === 'setup' && data && (
           <div>
             <div style={{background:'var(--bg3)',border:'1px solid var(--b1)',borderRadius:10,padding:'12px 14px',marginBottom:16,fontSize:12,color:'var(--t2)',lineHeight:1.9}}>
-              1. Открой Google Authenticator<br/>
+              1. Открой приложение аутентификатора<br/>
               2. Нажми "+" → "Сканировать QR-код"<br/>
               3. Введи 6-значный код для подтверждения
             </div>

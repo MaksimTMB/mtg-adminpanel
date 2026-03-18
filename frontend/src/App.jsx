@@ -21,7 +21,7 @@ function TotpOverlay({ onDone }) {
     if (code.length !== 6) return;
     setTotpCode(code);
     try {
-      await api('GET', '/api/totp/status');
+      await api('GET', '/api/nodes');
       onDone();
     } catch {
       setTotpCode('');
@@ -44,7 +44,7 @@ function TotpOverlay({ onDone }) {
         <div className="login-body">
           <form onSubmit={submit}>
             <p style={{fontSize:13,color:'var(--t2)',textAlign:'center',marginBottom:18,lineHeight:1.6}}>
-              Введи текущий код из приложения<br/>Google Authenticator
+              Введи текущий код из приложения<br/>аутентификатора
             </p>
             <div className="form-group">
               <input className="form-input totp-code-input" type="text" inputMode="numeric"
@@ -178,6 +178,9 @@ export default function App() {
             {item.icon}<span className="mob-label">{item.label}</span>
           </div>
         ))}
+        <div className="mob-item mob-logout" onClick={() => { setToken(''); setTotpCode(''); setAuthed(false); }}>
+          <I.LogOut/><span className="mob-label">Выйти</span>
+        </div>
       </nav>
 
       <Toasts list={toasts}/>

@@ -132,7 +132,7 @@ export default function VersionBlock({ nodes, panelVersion }) {
                     )}
                     <a href="https://github.com/MaksimTMB/mtg-adminpanel/releases" target="_blank"
                       className="btn btn-ghost btn-sm" style={{textDecoration:'none'}}>
-                      Releases
+                      Релизы
                     </a>
                   </div>
                 </div>

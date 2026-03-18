@@ -84,13 +84,13 @@ export default function NodeModal({ node, onClose, onSave }) {
             <FlagPicker value={f.flag} onChange={v => set('flag', v)}/>
           </div>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-            <div className="form-group"><label className="form-label">SSH User</label>
+            <div className="form-group"><label className="form-label">SSH Пользователь</label>
               <input className="form-input" placeholder="root" value={f.ssh_user} onChange={e => set('ssh_user', e.target.value)}/></div>
-            <div className="form-group"><label className="form-label">SSH Port</label>
+            <div className="form-group"><label className="form-label">SSH Порт</label>
               <input className="form-input" type="number" placeholder="22" value={f.ssh_port} onChange={e => set('ssh_port', parseInt(e.target.value))}/></div>
-            <div className="form-group"><label className="form-label">Base Dir</label>
+            <div className="form-group"><label className="form-label">Рабочий каталог</label>
               <input className="form-input" placeholder="/opt/mtg/users" value={f.base_dir} onChange={e => set('base_dir', e.target.value)}/></div>
-            <div className="form-group"><label className="form-label">Start Port</label>
+            <div className="form-group"><label className="form-label">Начальный порт</label>
               <input className="form-input" type="number" placeholder="4433" value={f.start_port} onChange={e => set('start_port', parseInt(e.target.value))}/></div>
           </div>
           <div className="form-group">

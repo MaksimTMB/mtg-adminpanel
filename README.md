@@ -141,7 +141,7 @@
 git clone https://github.com/MaksimTMB/mtg-adminpanel.git /opt/mtg-adminpanel
 cd /opt/mtg-adminpanel
 cp .env.example .env
-# Отредактируй .env: установи AUTH_TOKEN
+# Отредактируй .env: установи AUTH_TOKEN (пароль для входа)
 docker compose up -d
 ```
 
@@ -167,10 +167,10 @@ nano .env
 
 Минимальная конфигурация:
 ```env
-AUTH_TOKEN=your_secret_token_here   # Обязательно: токен входа в панель
-AGENT_TOKEN=mtg-agent-secret        # Токен для MTG Agent (должен совпадать на нодах)
-AGENT_PORT=8081                     # Порт агента на нодах
-PORT=3000                           # Порт веб-интерфейса
+AUTH_TOKEN=your-strong-password-here  # Обязательно: пароль для входа в панель
+AGENT_TOKEN=mtg-agent-secret          # Токен агента (должен совпадать на нодах)
+AGENT_PORT=8081                       # Порт агента на нодах
+PORT=3000                             # Порт веб-интерфейса
 ```
 
 ### 3. Запустить
@@ -517,11 +517,11 @@ x-totp-code: 123456
 
 | Переменная | Описание | По умолчанию |
 |-----------|----------|-------------|
-| `AUTH_TOKEN` | Токен авторизации в панель | — (обязательно) |
-| `AGENT_TOKEN` | Токен для MTG Agent на нодах | `mtg-agent-secret` |
-| `AGENT_PORT` | Порт MTG Agent | `8081` |
+| `AUTH_TOKEN` | **Пароль** для входа в панель (вводится на странице входа) | — (обязательно) |
 | `PORT` | Порт веб-интерфейса | `3000` |
 | `DATA_DIR` | Директория SQLite базы данных | `/data` |
+| `AGENT_PORT` | Порт MTG Agent на нодах | `8081` |
+| `AGENT_TOKEN` | Токен авторизации MTG Agent (должен совпадать на всех нодах) | `mtg-agent-secret` |
 
 ### Агент (`/opt/mtg-agent/.env`)
 

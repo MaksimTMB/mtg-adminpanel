@@ -46,14 +46,14 @@ export default function Login({ onLogin }) {
         <div className="login-head">
           <div className="login-icon">{step === 'totp' ? <I.Shield/> : <I.Zap/>}</div>
           <div className="login-title">MTG Panel</div>
-          <div className="login-sub">{step === 'totp' ? 'two-factor auth' : 'mtg proxy manager'}</div>
+          <div className="login-sub">{step === 'totp' ? 'двухфакторная аутентификация' : 'управление прокси'}</div>
         </div>
         <div className="login-body">
           {step === 'token' ? (
             <form onSubmit={submitToken}>
               <div className="form-group">
-                <label className="form-label">Auth Token</label>
-                <input className="form-input" type="password" placeholder="Введи токен доступа..."
+                <label className="form-label">Пароль</label>
+                <input className="form-input" type="password" placeholder="Введи пароль..."
                   value={tok} onChange={e => setTok(e.target.value)} autoFocus/>
               </div>
               <button className="btn btn-primary" style={{width:'100%',justifyContent:'center',padding:10}} type="submit" disabled={loading}>
@@ -63,7 +63,7 @@ export default function Login({ onLogin }) {
           ) : (
             <form onSubmit={submitTotp}>
               <p style={{fontSize:13,color:'var(--t2)',textAlign:'center',marginBottom:18,lineHeight:1.6}}>
-                Открой Google Authenticator и введи<br/>текущий 6-значный код
+                Открой приложение аутентификатора и введи<br/>текущий 6-значный код
               </p>
               <div className="form-group">
                 <input className="form-input totp-code-input" type="text" inputMode="numeric"
