@@ -45,7 +45,8 @@ def _get_mtg_containers():
         return None
     try:
         return [c for c in dclient.containers.list(all=True)
-                if c.name.startswith("mtg-") and c.name != "mtg-agent"]
+                if c.name.startswith("mtg-")
+                and c.name not in ("mtg-agent", "mtg-panel")]
     except Exception:
         return None  # SDK failed — caller must use CLI fallback
 
