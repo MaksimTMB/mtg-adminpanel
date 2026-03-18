@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors    = require('cors');
 const path    = require('path');
+const crypto  = require('crypto');
 const db      = require('./db');
 const ssh     = require('./ssh');
 const nodeCache = require('./nodeCache');
@@ -56,6 +57,26 @@ app.get('/api/version', (req, res) => {
   res.json({ version: pkgVersion });
 });
 
+// ── TOTP Session store (in-memory, 24h TTL) ───────────────
+const _totpSessions = new Map();
+function _createTotpSession() {
+  const token = crypto.randomBytes(32).toString('hex');
+  _totpSessions.set(token, Date.now() + 24 * 60 * 60 * 1000);
+  return token;
+}
+function _isValidTotpSession(token) {
+  if (!token) return false;
+  const exp = _totpSessions.get(token);
+  if (!exp) return false;
+  if (Date.now() > exp) { _totpSessions.delete(token); return false; }
+  return true;
+}
+// Clean expired sessions hourly
+setInterval(() => {
+  const now = Date.now();
+  for (const [t, exp] of _totpSessions) if (now > exp) _totpSessions.delete(t);
+}, 60 * 60 * 1000);
+
 // ── Auth middleware ───────────────────────────────────────
 app.use('/api', (req, res, next) => {
   const token = req.headers['x-auth-token'] || req.query.token;
@@ -64,10 +85,14 @@ app.use('/api', (req, res, next) => {
   const totpExempt = ['/totp/setup', '/totp/verify', '/totp/status', '/totp/disable'];
   if (isTotpEnabled() && !totpExempt.some(p => req.path.startsWith(p))) {
     const code = req.headers['x-totp-code'];
+    // Accept valid session token (issued after first TOTP verification)
+    if (_isValidTotpSession(code)) { next(); return; }
+    // Accept valid TOTP code — issue session token for subsequent requests
     const secret = getTotpSecret();
     if (!code || !authenticator.verify(code, secret)) {
       return res.status(403).json({ error: 'TOTP required', totp: true });
     }
+    res.setHeader('x-totp-session', _createTotpSession());
   }
   next();
 });
