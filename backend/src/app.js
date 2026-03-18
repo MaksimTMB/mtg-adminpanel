@@ -48,7 +48,7 @@ nodeCache.start(db);
 
 // ── App ───────────────────────────────────────────────────
 const app = express();
-app.use(cors());
+app.use(cors({ exposedHeaders: ['x-totp-session'] }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../public')));
 
