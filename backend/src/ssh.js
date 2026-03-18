@@ -210,8 +210,20 @@ async function createRemoteUser(node, name) {
       // Agent returned success but with missing/null port or secret
       // This can happen if agent's BASE_DIR is wrong — fall through to SSH
     } catch (e) {
-      // Rethrow only clear user-level errors (user exists, invalid name format)
-      if (e.message && (e.message.includes('already exists') || e.message.includes('Invalid name'))) {
+      // Agent says user already exists on remote but NOT in DB (partial failure from
+      // a previous attempt). Recover by reading the user's port+secret from agent cache.
+      if (e.message && e.message.includes('already exists')) {
+        try {
+          const users = await agentGet(node, '/users');
+          const existing = Array.isArray(users) && users.find(u => u.name === name);
+          if (existing && existing.port && existing.secret) {
+            return { port: existing.port, secret: existing.secret };
+          }
+        } catch {}
+        // Can't recover port+secret from agent — fall through to SSH to read config files
+      }
+      // Invalid name format — always rethrow
+      if (e.message && e.message.includes('Invalid name')) {
         throw e;
       }
       // If no SSH credentials configured, can't fall back — throw agent error directly
@@ -238,7 +250,22 @@ async function createRemoteUser(node, name) {
     'echo "OK|$NAME|$PORT|$SECRET"'
   ].join('\n');
   const r = await sshExec(node, cmd);
-  if (r.output.includes('EXISTS')) throw new Error('User already exists on node');
+  if (r.output.includes('EXISTS')) {
+    // Remote dir exists but user not in DB — read existing config files to recover port+secret
+    const recoverCmd = [
+      'BASE=' + baseDir, 'NAME=' + name, 'USER_DIR="$BASE/$NAME"',
+      "SECRET=$(grep secret \"$USER_DIR/config.toml\" 2>/dev/null | awk -F'\"' '{print $2}')",
+      "PORT=$(grep -o '[0-9]*:3128' \"$USER_DIR/docker-compose.yml\" 2>/dev/null | cut -d: -f1)",
+      'echo "RECOVER|$PORT|$SECRET"'
+    ].join('\n');
+    const rec = await sshExec(node, recoverCmd);
+    const recLine = rec.output.split('\n').find(l => l.startsWith('RECOVER|'));
+    if (recLine) {
+      const [, rPort, rSecret] = recLine.split('|');
+      if (rPort && rSecret) return { port: parseInt(rPort), secret: rSecret };
+    }
+    throw new Error('User already exists on node');
+  }
   const okLine = r.output.split('\n').find(l => l.startsWith('OK|'));
   if (!okLine) throw new Error('Failed to create user: ' + r.output);
   const parts = okLine.split('|');
