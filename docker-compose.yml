@@ -12,3 +12,4 @@ services:
       - PORT=3000
       - DATA_DIR=/data
       - AUTH_TOKEN=${AUTH_TOKEN:-changeme}
+      - AGENT_TOKEN=${AGENT_TOKEN:-mtg-agent-secret}
