@@ -494,6 +494,19 @@ app.post('/api/nodes/:id/users/:name/reset-traffic', async (req, res) => {
   const node = db.prepare('SELECT * FROM nodes WHERE id = ?').get(req.params.id);
   if (!node) return res.status(404).json({ error: 'Node not found' });
   try {
+    // Accumulate current live traffic into total before resetting
+    const cached = nodeCache.get(node.id);
+    const cachedUser = cached?.remoteUsers?.find(u => u.name === req.params.name);
+    if (cachedUser?.traffic) {
+      const u = db.prepare('SELECT total_traffic_rx_bytes, total_traffic_tx_bytes FROM users WHERE node_id=? AND name=?')
+        .get(req.params.id, req.params.name);
+      if (u) {
+        db.prepare('UPDATE users SET total_traffic_rx_bytes=?, total_traffic_tx_bytes=? WHERE node_id=? AND name=?')
+          .run(parseBytes(cachedUser.traffic.rx) + (u.total_traffic_rx_bytes || 0),
+               parseBytes(cachedUser.traffic.tx) + (u.total_traffic_tx_bytes || 0),
+               req.params.id, req.params.name);
+      }
+    }
     await ssh.restartRemoteUser(node, req.params.name);
     db.prepare(`UPDATE users SET
       traffic_reset_at=datetime('now'), traffic_rx_snap=NULL, traffic_tx_snap=NULL,
