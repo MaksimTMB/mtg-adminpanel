@@ -205,13 +205,11 @@ async function createRemoteUser(node, name) {
       const r = await agentPost(node, '/users', { name });
       return { port: r.port, secret: r.secret };
     } catch (e) {
-      if (e.message && e.message.includes('already exists')) throw new Error('User already exists on node');
-      // Fall through to SSH only if agent is unavailable (connection error)
-      if (!e.message.includes('already exists') && !e.message.includes('Invalid')) {
-        // Network error — try SSH
-      } else {
+      // Rethrow only clear user-level errors (user exists, invalid name format)
+      if (e.message && (e.message.includes('already exists') || e.message.includes('Invalid name'))) {
         throw e;
       }
+      // Network errors, JSON issues, timeouts → fall through to SSH fallback
     }
   }
   // SSH fallback
@@ -244,7 +242,12 @@ async function removeRemoteUser(node, name) {
       await agentDelete(node, `/users/${name}`);
       return;
     } catch (e) {
-      if (!e.message.includes('timeout') && !e.message.includes('ECONNREFUSED')) throw e;
+      // "User not found" from agent means dir missing — SSH fallback silently handles it
+      // Timeout / ECONNREFUSED — also try SSH
+      // Any other agent error (403, 500, etc.) — rethrow
+      if (!e.message.includes('timeout') && !e.message.includes('ECONNREFUSED') && !e.message.toLowerCase().includes('not found')) {
+        throw e;
+      }
     }
   }
   // SSH fallback

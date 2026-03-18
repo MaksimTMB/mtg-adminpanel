@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import docker
 
-app = FastAPI(title="MTG Agent", version="2.1.0")
+app = FastAPI(title="MTG Agent", version="2.2.0")
 
 AGENT_TOKEN  = os.environ.get("AGENT_TOKEN", "mtg-agent-secret")
 BASE_DIR     = Path("/opt/mtg/users")
@@ -68,22 +68,24 @@ def _connections(container) -> int:
         pid = container.attrs.get("State", {}).get("Pid", 0)
         if not pid:
             return 0
-        # Try tcp6 first (handles dual-stack); fall back to tcp.
-        # Never read both simultaneously — same connection appears in both
-        # on dual-stack kernels causing double-counting.
-        try:
-            lines = open(f"/proc/{pid}/net/tcp6").readlines()[1:]
-        except Exception:
-            lines = open(f"/proc/{pid}/net/tcp").readlines()[1:]
+        # Read both tcp6 and tcp. MTG binds to 0.0.0.0:3128 (IPv4-only socket) on some
+        # kernels → connections appear only in tcp, not tcp6.  On other kernels (IPv4-mapped
+        # dual-stack) they appear only in tcp6.  A connection is always in exactly ONE of the
+        # two files, so reading both with a set() is safe — no double-counting.
         ips = set()
-        for line in lines:
-            parts = line.split()
-            if len(parts) < 4:
+        for proc_net in [f"/proc/{pid}/net/tcp6", f"/proc/{pid}/net/tcp"]:
+            try:
+                lines = open(proc_net).readlines()[1:]
+            except Exception:
                 continue
-            local_port = parts[1].split(":")[1] if ":" in parts[1] else ""
-            if parts[3] == "01" and local_port == MTG_PORT_HEX:
-                remote_ip = parts[2].rsplit(":", 1)[0]
-                ips.add(remote_ip)
+            for line in lines:
+                parts = line.split()
+                if len(parts) < 4:
+                    continue
+                local_port = parts[1].split(":")[1] if ":" in parts[1] else ""
+                if parts[3] == "01" and local_port == MTG_PORT_HEX:
+                    remote_ip = parts[2].rsplit(":", 1)[0]
+                    ips.add(remote_ip)
         return len(ips)
     except Exception:
         return 0
@@ -254,7 +256,7 @@ def _dc(user_dir: Path, *args):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "2.1.0"}
+    return {"status": "ok", "version": "2.2.0"}
 
 
 @app.get("/metrics")
