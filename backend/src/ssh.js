@@ -161,7 +161,7 @@ async function getRemoteUsers(node) {
       "  PID=$(docker inspect --format '{{.State.Pid}}' \"mtg-$NAME\" 2>/dev/null)",
       "  CONNS=0",
       "  if [ -n \"$PID\" ] && [ \"$PID\" != \"0\" ]; then",
-      "    CONNS=$(awk 'NR>1 && $4==\"01\" && substr($2,index($2,\":\")+1)==\"0C38\"{split($3,a,\":\"); ip=a[1]; if(length(ip)>8)ip=substr(ip,length(ip)-7); ips[ip]=1} END{print length(ips)+0}' /proc/$PID/net/tcp /proc/$PID/net/tcp6 2>/dev/null || echo 0)",
+      "    CONNS=$(awk 'NR>1 && $4==\"01\" && substr($2,index($2,\":\")+1)==\"0C38\"{c++} END{print c+0}' /proc/$PID/net/tcp /proc/$PID/net/tcp6 2>/dev/null || echo 0)",
       "  fi",
       '  echo "USER|$NAME|$PORT|$SECRET|${STATUS:-stopped}|$CONNS"',
       'done'
