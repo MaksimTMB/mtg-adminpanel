@@ -277,13 +277,8 @@ async function removeRemoteUser(node, name) {
     try {
       await agentDelete(node, `/users/${name}`);
       return;
-    } catch (e) {
-      // "User not found" from agent means dir missing — SSH fallback silently handles it
-      // Timeout / ECONNREFUSED — also try SSH
-      // Any other agent error (403, 500, etc.) — rethrow
-      if (!e.message.includes('timeout') && !e.message.includes('ECONNREFUSED') && !e.message.toLowerCase().includes('not found')) {
-        throw e;
-      }
+    } catch (_) {
+      // Any agent error (not found, invalid JSON, timeout, etc.) — fall through to SSH
     }
   }
   // SSH fallback
