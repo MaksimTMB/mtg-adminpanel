@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import docker
 
-app = FastAPI(title="MTG Agent", version="2.2.0")
+app = FastAPI(title="MTG Agent", version="2.2.1")
 
 AGENT_TOKEN  = os.environ.get("AGENT_TOKEN", "mtg-agent-secret")
 BASE_DIR     = Path("/opt/mtg/users")
@@ -256,7 +256,7 @@ def _dc(user_dir: Path, *args):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "2.2.0"}
+    return {"status": "ok", "version": "2.2.1"}
 
 
 @app.get("/metrics")
@@ -321,10 +321,12 @@ async def create_user(body: CreateUserBody, x_agent_token: str = Header(default=
 async def delete_user(name: str, x_agent_token: str = Header(default="")):
     auth(x_agent_token)
     user_dir = BASE_DIR / name
-    if not user_dir.exists():
-        raise HTTPException(status_code=404, detail="User not found")
-    _dc(user_dir, "down")
-    shutil.rmtree(str(user_dir), ignore_errors=True)
+    if user_dir.exists():
+        _dc(user_dir, "down")
+        shutil.rmtree(str(user_dir), ignore_errors=True)
+    # Always evict from cache and refresh — even if dir was already gone (SSH fallback case)
+    containers = [c for c in _cache.get("containers", []) if c["name"] != name]
+    _cache["containers"] = containers
     asyncio.create_task(_refresh_once())
     return JSONResponse({"ok": True})
 

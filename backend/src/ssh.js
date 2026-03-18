@@ -288,6 +288,10 @@ async function removeRemoteUser(node, name) {
     'echo DONE'
   ].join('\n');
   await sshExec(node, cmd);
+  // Tell agent to evict this user from its cache (directory is already gone, agent returns OK)
+  if (node.agent_port) {
+    agentDelete(node, `/users/${name}`).catch(() => {});
+  }
 }
 
 async function stopRemoteUser(node, name) {
