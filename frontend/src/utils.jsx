@@ -24,6 +24,14 @@ export function parseVer(raw) {
   return { name: raw.slice(0, 20), date: null };
 }
 
+export function fmtBytes(b) {
+  if (!b) return '0';
+  if (b >= 1073741824) return (b / 1073741824).toFixed(2) + ' GB';
+  if (b >= 1048576)    return (b / 1048576).toFixed(2) + ' MB';
+  if (b >= 1024)       return (b / 1024).toFixed(2) + ' KB';
+  return b + ' B';
+}
+
 export function parseBytes(str) {
   if (!str) return 0;
   const m = str.match(/([\d.]+)(GB|MB|KB|B)/i);

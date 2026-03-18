@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors    = require('cors');
 const path    = require('path');
+const crypto  = require('crypto');
 const db      = require('./db');
 const ssh     = require('./ssh');
 const nodeCache = require('./nodeCache');
@@ -47,7 +48,7 @@ nodeCache.start(db);
 
 // ── App ───────────────────────────────────────────────────
 const app = express();
-app.use(cors());
+app.use(cors({ exposedHeaders: ['x-totp-session'] }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../public')));
 
@@ -55,6 +56,30 @@ app.use(express.static(path.join(__dirname, '../public')));
 app.get('/api/version', (req, res) => {
   res.json({ version: pkgVersion });
 });
+
+// ── TOTP Session store (SQLite-backed, 24h TTL) ───────────
+db.prepare(`CREATE TABLE IF NOT EXISTS totp_sessions (
+  token TEXT PRIMARY KEY,
+  expires_at INTEGER NOT NULL
+)`).run();
+
+function _createTotpSession() {
+  const token = crypto.randomBytes(32).toString('hex');
+  const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
+  db.prepare('INSERT OR REPLACE INTO totp_sessions (token, expires_at) VALUES (?, ?)').run(token, expiresAt);
+  return token;
+}
+function _isValidTotpSession(token) {
+  if (!token || token.length < 10) return false;
+  const row = db.prepare('SELECT expires_at FROM totp_sessions WHERE token = ?').get(token);
+  if (!row) return false;
+  if (Date.now() > row.expires_at) { db.prepare('DELETE FROM totp_sessions WHERE token = ?').run(token); return false; }
+  return true;
+}
+// Clean expired sessions hourly
+setInterval(() => {
+  db.prepare('DELETE FROM totp_sessions WHERE expires_at < ?').run(Date.now());
+}, 60 * 60 * 1000);
 
 // ── Auth middleware ───────────────────────────────────────
 app.use('/api', (req, res, next) => {
@@ -64,10 +89,14 @@ app.use('/api', (req, res, next) => {
   const totpExempt = ['/totp/setup', '/totp/verify', '/totp/status', '/totp/disable'];
   if (isTotpEnabled() && !totpExempt.some(p => req.path.startsWith(p))) {
     const code = req.headers['x-totp-code'];
+    // Accept valid session token (issued after first TOTP verification)
+    if (_isValidTotpSession(code)) { next(); return; }
+    // Accept valid TOTP code — issue session token for subsequent requests
     const secret = getTotpSecret();
     if (!code || !authenticator.verify(code, secret)) {
       return res.status(403).json({ error: 'TOTP required', totp: true });
     }
+    res.setHeader('x-totp-session', _createTotpSession());
   }
   next();
 });
@@ -465,6 +494,19 @@ app.post('/api/nodes/:id/users/:name/reset-traffic', async (req, res) => {
   const node = db.prepare('SELECT * FROM nodes WHERE id = ?').get(req.params.id);
   if (!node) return res.status(404).json({ error: 'Node not found' });
   try {
+    // Accumulate current live traffic into total before resetting
+    const cached = nodeCache.get(node.id);
+    const cachedUser = cached?.remoteUsers?.find(u => u.name === req.params.name);
+    if (cachedUser?.traffic) {
+      const u = db.prepare('SELECT total_traffic_rx_bytes, total_traffic_tx_bytes FROM users WHERE node_id=? AND name=?')
+        .get(req.params.id, req.params.name);
+      if (u) {
+        db.prepare('UPDATE users SET total_traffic_rx_bytes=?, total_traffic_tx_bytes=? WHERE node_id=? AND name=?')
+          .run(parseBytes(cachedUser.traffic.rx) + (u.total_traffic_rx_bytes || 0),
+               parseBytes(cachedUser.traffic.tx) + (u.total_traffic_tx_bytes || 0),
+               req.params.id, req.params.name);
+      }
+    }
     await ssh.restartRemoteUser(node, req.params.name);
     db.prepare(`UPDATE users SET
       traffic_reset_at=datetime('now'), traffic_rx_snap=NULL, traffic_tx_snap=NULL,

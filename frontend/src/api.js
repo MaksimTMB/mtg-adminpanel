@@ -22,6 +22,9 @@ export async function api(method, path, body) {
   const req = fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined })
     .then(async r => {
       delete _pend[key];
+      // Persist session token issued after TOTP validation (valid 24h)
+      const session = r.headers.get('x-totp-session');
+      if (session) setTotpCode(session);
       if (r.status === 401) { setToken(''); throw new Error('Unauthorized'); }
       if (r.status === 403) {
         const d = await r.json().catch(() => ({}));

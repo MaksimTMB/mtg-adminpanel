@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api.js';
 import { toast } from '../toast.jsx';
-import { flagUrl, expiryBadge } from '../utils.jsx';
+import { flagUrl, expiryBadge, fmtBytes } from '../utils.jsx';
 import AddUserModal from './AddUserModal.jsx';
 import EditModal from './EditModal.jsx';
 import QRModal from './QRModal.jsx';
@@ -125,6 +125,7 @@ export default function UsersPage({ node, onBack }) {
                 <th>Статус</th>
                 <th>Подключения</th>
                 <th>Трафик</th>
+                <th>Всего</th>
                 <th>Срок / Лимит</th>
                 <th>Заметка</th>
                 <th>Действия</th>
@@ -174,6 +175,17 @@ export default function UsersPage({ node, onBack }) {
                             </span>
                           : <span style={{color:'var(--t3)',fontSize:12}}>—</span>}
                       </td>
+
+                      {/* Всего за всё время */}
+                      <td>
+                        {(u.total_traffic_rx_bytes > 0 || u.total_traffic_tx_bytes > 0)
+                          ? <span className="traf" title="Накопленный трафик за все периоды">
+                              <span className="rx">↓{fmtBytes(u.total_traffic_rx_bytes)}</span>
+                              <span className="tx"> ↑{fmtBytes(u.total_traffic_tx_bytes)}</span>
+                            </span>
+                          : <span style={{color:'var(--t3)',fontSize:12}}>—</span>}
+                      </td>
+
                       <td>
                         <div style={{display:'flex',flexDirection:'column',gap:3}}>
                           {u.expires_at && <div>{expiryBadge(u.expires_at)}</div>}

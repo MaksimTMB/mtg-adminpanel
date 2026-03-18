@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api.js';
 import { toast } from '../toast.jsx';
-import { flagUrl, expiryBadge } from '../utils.jsx';
+import { flagUrl, expiryBadge, fmtBytes } from '../utils.jsx';
 import * as I from '../icons.jsx';
 
 const copyText = (txt) => navigator.clipboard.writeText(txt).then(() => toast('Скопировано!', 'success'));
@@ -92,6 +92,7 @@ export default function AllUsers({ nodes, onSelectNode }) {
                         <th>Порт</th>
                         <th>Подключения</th>
                         <th>Трафик</th>
+                        <th>Всего</th>
                         <th>Статус</th>
                         <th>Срок</th>
                         <th>Заметка</th>
@@ -113,6 +114,14 @@ export default function AllUsers({ nodes, onSelectNode }) {
                                     <span className="rx">↓{u.traffic.rx}</span>
                                     <span className="tx"> ↑{u.traffic.tx}</span>
                                     {!u.traffic.live && <span style={{fontSize:10,color:'var(--t3)',marginLeft:3}} title="Данные на момент остановки">⏸</span>}
+                                  </span>
+                                : <span style={{color:'var(--t3)',fontSize:11}}>—</span>}
+                            </td>
+                            <td>
+                              {(u.total_traffic_rx_bytes > 0 || u.total_traffic_tx_bytes > 0)
+                                ? <span className="traf" title="Накопленный трафик за все периоды">
+                                    <span className="rx">↓{fmtBytes(u.total_traffic_rx_bytes)}</span>
+                                    <span className="tx"> ↑{fmtBytes(u.total_traffic_tx_bytes)}</span>
                                   </span>
                                 : <span style={{color:'var(--t3)',fontSize:11}}>—</span>}
                             </td>
