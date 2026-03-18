@@ -68,14 +68,13 @@ def _connections(container) -> int:
         pid = container.attrs.get("State", {}).get("Pid", 0)
         if not pid:
             return 0
-        # Read both tcp and tcp6 — MTG binds IPv4 (appears in tcp only),
-        # but some kernels/configs use dual-stack (appears in tcp6 as IPv4-mapped).
-        lines = []
-        for fname in ("tcp", "tcp6"):
-            try:
-                lines += open(f"/proc/{pid}/net/{fname}").readlines()[1:]
-            except Exception:
-                pass
+        # Try tcp6 first (handles dual-stack); fall back to tcp.
+        # Never read both simultaneously — same connection appears in both
+        # on dual-stack kernels causing double-counting.
+        try:
+            lines = open(f"/proc/{pid}/net/tcp6").readlines()[1:]
+        except Exception:
+            lines = open(f"/proc/{pid}/net/tcp").readlines()[1:]
         ips = set()
         for line in lines:
             parts = line.split()
@@ -83,7 +82,8 @@ def _connections(container) -> int:
                 continue
             local_port = parts[1].split(":")[1] if ":" in parts[1] else ""
             if parts[3] == "01" and local_port == MTG_PORT_HEX:
-                ips.add(parts[2].rsplit(":", 1)[0])
+                remote_ip = parts[2].rsplit(":", 1)[0]
+                ips.add(remote_ip)
         return len(ips)
     except Exception:
         return 0
