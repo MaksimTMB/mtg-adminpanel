@@ -57,24 +57,28 @@ app.get('/api/version', (req, res) => {
   res.json({ version: pkgVersion });
 });
 
-// ── TOTP Session store (in-memory, 24h TTL) ───────────────
-const _totpSessions = new Map();
+// ── TOTP Session store (SQLite-backed, 24h TTL) ───────────
+db.prepare(`CREATE TABLE IF NOT EXISTS totp_sessions (
+  token TEXT PRIMARY KEY,
+  expires_at INTEGER NOT NULL
+)`).run();
+
 function _createTotpSession() {
   const token = crypto.randomBytes(32).toString('hex');
-  _totpSessions.set(token, Date.now() + 24 * 60 * 60 * 1000);
+  const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
+  db.prepare('INSERT OR REPLACE INTO totp_sessions (token, expires_at) VALUES (?, ?)').run(token, expiresAt);
   return token;
 }
 function _isValidTotpSession(token) {
-  if (!token) return false;
-  const exp = _totpSessions.get(token);
-  if (!exp) return false;
-  if (Date.now() > exp) { _totpSessions.delete(token); return false; }
+  if (!token || token.length < 10) return false;
+  const row = db.prepare('SELECT expires_at FROM totp_sessions WHERE token = ?').get(token);
+  if (!row) return false;
+  if (Date.now() > row.expires_at) { db.prepare('DELETE FROM totp_sessions WHERE token = ?').run(token); return false; }
   return true;
 }
 // Clean expired sessions hourly
 setInterval(() => {
-  const now = Date.now();
-  for (const [t, exp] of _totpSessions) if (now > exp) _totpSessions.delete(t);
+  db.prepare('DELETE FROM totp_sessions WHERE expires_at < ?').run(Date.now());
 }, 60 * 60 * 1000);
 
 // ── Auth middleware ───────────────────────────────────────
