@@ -1035,7 +1035,7 @@ function Dashboard({ nodes, onSelectNode, onManageNode }) {
   const totalUsers    = useMemo(() => nodes.reduce((a,n)=>a+(n._userCount||0),0), [nodes]);
   const onlineNodes   = useMemo(() => status.filter(s=>s.online).length, [status]);
   const activeProxies = useMemo(() => status.reduce((a,s)=>a+(s.containers||0),0), [status]);
-  const stoppedProxies = totalUsers - activeProxies;
+  const stoppedProxies = Math.max(0, totalUsers - activeProxies);
   const totalOnline   = useMemo(() => status.reduce((a,s)=>a+(s.online_users||0),0), [status]);
 
   return (
@@ -1551,6 +1551,7 @@ function AddUserModal({ nodeId, onClose, onSave }) {
 
   const submit = async () => {
     if(!f.name.trim()){toast('Введи имя','error');return;}
+    if(f.name.length > 32){toast('Имя не может быть длиннее 32 символов','error');return;}
     setLoading(true);
     try {
       const u = await api('POST',`/api/nodes/${nodeId}/users`,{
@@ -1785,7 +1786,10 @@ function UsersPage({ node, onBack }) {
   };
 
   const toggle = async (user) => {
-    const action = user.running?'stop':'start';
+    const action = user.running ? 'stop' : 'start';
+    if (action === 'start' && user.expired) {
+      if (!confirm(`Срок действия клиента ${user.name} истёк.\nОн будет автоматически остановлен заново.\nЧтобы продлить — обнови дату в настройках клиента.\n\nВсё равно запустить?`)) return;
+    }
     setUsers(p=>p.map(u=>u.name===user.name?{...u,running:!user.running}:u));
     setBusyFor(user.name,true);
     try { await api('POST',`/api/nodes/${node.id}/users/${user.name}/${action}`); toast(`${user.name}: ${action==='stop'?'остановлен':'запущен'}`,'success'); }
@@ -1849,7 +1853,7 @@ function UsersPage({ node, onBack }) {
                   const devLimit = u.max_devices;
                   const devOver = devLimit && u.connections > devLimit;
                   return (
-                  <tr key={u.id} style={{opacity:u.expired ? 0.5 : 1}}>
+                  <tr key={u.id}>
                     <td><span style={{fontFamily:'var(--mono)',fontWeight:600,fontSize:14}}>{u.name}</span></td>
                     <td><span className="badge badge-purple">{u.port}</span></td>
                     <td>
@@ -1874,10 +1878,13 @@ function UsersPage({ node, onBack }) {
                         : <span style={{color:'var(--t3)',fontSize:12}}>—</span>}
                     </td>
                     <td>
-                      <span className={`badge ${u.running?'badge-green':'badge-red'}`}>
-                        <span className={`dot ${u.running?'dot-live':''}`}/>
-                        {u.running?'active':'stopped'}
-                      </span>
+                      <div style={{display:'flex',flexDirection:'column',gap:3,alignItems:'flex-start'}}>
+                        <span className={`badge ${u.running?'badge-green':'badge-red'}`}>
+                          <span className={`dot ${u.running?'dot-live':''}`}/>
+                          {u.running?'active':'stopped'}
+                        </span>
+                        {u.expired && <span className="badge badge-amber">истёк</span>}
+                      </div>
                     </td>
                     <td>
                       <div style={{display:'flex',flexDirection:'column',gap:3}}>
