@@ -203,11 +203,20 @@ async function createRemoteUser(node, name) {
   if (node.agent_port) {
     try {
       const r = await agentPost(node, '/users', { name });
-      return { port: r.port, secret: r.secret };
+      // Validate agent response — port and secret must be present
+      if (r && r.port && r.secret) {
+        return { port: r.port, secret: r.secret };
+      }
+      // Agent returned success but with missing/null port or secret
+      // This can happen if agent's BASE_DIR is wrong — fall through to SSH
     } catch (e) {
       // Rethrow only clear user-level errors (user exists, invalid name format)
       if (e.message && (e.message.includes('already exists') || e.message.includes('Invalid name'))) {
         throw e;
+      }
+      // If no SSH credentials configured, can't fall back — throw agent error directly
+      if (!node.ssh_key && !node.ssh_password) {
+        throw new Error(`Агент недоступен и SSH не настроен: ${e.message}`);
       }
       // Network errors, JSON issues, timeouts → fall through to SSH fallback
     }

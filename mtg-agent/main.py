@@ -305,7 +305,12 @@ async def create_user(body: CreateUserBody, x_agent_token: str = Header(default=
     port   = _next_port()
     secret = _generate_secret()
     _write_files(user_dir, name, port, secret)
-    _dc(user_dir, "up", "-d")
+    r = subprocess.run(["docker", "compose", "up", "-d"],
+                       cwd=str(user_dir), capture_output=True, text=True)
+    if r.returncode != 0:
+        # Clean up on failure so the dir doesn't block future attempts
+        shutil.rmtree(str(user_dir), ignore_errors=True)
+        raise HTTPException(status_code=500, detail=f"docker compose up failed: {r.stderr[-300:]}")
     # Invalidate cache so next read sees the new user
     _cache_ready.clear()
     asyncio.create_task(_refresh_once())

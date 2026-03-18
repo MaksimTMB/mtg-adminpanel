@@ -72,9 +72,18 @@ async function _refreshNode(node) {
     }
 
     const prev = cache.get(node.id) || _empty();
+    const newStatus      = statusResult.status === 'fulfilled' ? statusResult.value  : prev.status;
+    const newRemoteUsers = usersResult.status  === 'fulfilled' ? usersResult.value   : prev.remoteUsers;
+
+    // SSH path always returns online_users: 0 — fill it in from remoteUsers connections
+    if (newStatus && newStatus.online_users === 0 && newRemoteUsers && newRemoteUsers.length > 0) {
+      const liveCount = newRemoteUsers.filter(u => (u.connections || 0) > 0).length;
+      if (liveCount > 0) newStatus.online_users = liveCount;
+    }
+
     cache.set(node.id, {
-      status:       statusResult.status  === 'fulfilled' ? statusResult.value  : prev.status,
-      remoteUsers:  usersResult.status   === 'fulfilled' ? usersResult.value   : prev.remoteUsers,
+      status:       newStatus,
+      remoteUsers:  newRemoteUsers,
       agentVersion: healthResult.status  === 'fulfilled' && healthResult.value
                       ? (healthResult.value.version || null)
                       : prev.agentVersion,
