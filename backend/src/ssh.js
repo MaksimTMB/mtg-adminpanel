@@ -131,7 +131,10 @@ async function getRemoteUsers(node) {
   if (node.agent_port) {
     try {
       const users = await agentGet(node, '/users');
-      if (Array.isArray(users)) {
+      // Only trust agent result if it actually returned users.
+      // Empty array means agent's BASE_DIR doesn't match the real user directory
+      // (agent can't see users there) — fall through to SSH which reads the real path.
+      if (Array.isArray(users) && users.length > 0) {
         return users.map(u => ({
           name:        u.name,
           port:        u.port,
@@ -254,9 +257,8 @@ async function stopRemoteUser(node, name) {
     try {
       await agentPost(node, `/users/${name}/stop`);
       return;
-    } catch (e) {
-      // Only give up on agent if it's clearly unreachable — otherwise fall through to SSH
-      if (e.message.includes('not found') || e.message.includes('404')) throw e;
+    } catch (_) {
+      // Agent failed or doesn't know this user — always fall through to SSH
     }
   }
   await sshExec(node, 'cd ' + node.base_dir + '/' + name + ' && docker compose stop 2>/dev/null');
@@ -267,8 +269,8 @@ async function startRemoteUser(node, name) {
     try {
       await agentPost(node, `/users/${name}/start`);
       return;
-    } catch (e) {
-      if (e.message.includes('not found') || e.message.includes('404')) throw e;
+    } catch (_) {
+      // Agent failed or doesn't know this user — always fall through to SSH
     }
   }
   await sshExec(node, 'cd ' + node.base_dir + '/' + name + ' && docker compose up -d 2>/dev/null');
@@ -279,8 +281,8 @@ async function restartRemoteUser(node, name) {
     try {
       await agentPost(node, `/users/${name}/restart`);
       return;
-    } catch (e) {
-      if (e.message.includes('not found') || e.message.includes('404')) throw e;
+    } catch (_) {
+      // Agent failed or doesn't know this user — always fall through to SSH
     }
   }
   await sshExec(node, `cd ${node.base_dir}/${name} && docker compose stop 2>/dev/null; docker compose up -d 2>/dev/null`);

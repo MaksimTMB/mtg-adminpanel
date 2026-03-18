@@ -121,39 +121,63 @@ def _read_config(user_dir: Path) -> dict:
 
 # ── Core metrics compute (called in background) ───────────
 def _compute_all() -> list:
-    """Compute full metrics for all containers. Slow (Docker stats). Run in background."""
-    BASE_DIR.mkdir(parents=True, exist_ok=True)
+    """Compute full metrics for all containers. Slow (Docker stats). Run in background.
+    Iterates Docker containers directly (not BASE_DIR) so it works regardless of
+    where user dirs are mounted — matches the original working agent behaviour."""
     containers = _get_mtg_containers()   # None means SDK failed → use CLI fallback
     sdk_ok = containers is not None
     print(f"[compute] SDK ok={sdk_ok}, found {len(containers) if containers else 'N/A'} mtg-* containers")
-    by_name = {c.name: c for c in (containers or [])}
     result = []
 
-    for user_dir in sorted(BASE_DIR.iterdir()):
-        if not user_dir.is_dir():
-            continue
-        name     = user_dir.name
-        cfg      = _read_config(user_dir)
-        c        = by_name.get(f"mtg-{name}")
-        if c is not None:
+    if sdk_ok:
+        # Primary path: iterate containers discovered by Docker SDK (BASE_DIR-independent)
+        for c in sorted(containers, key=lambda x: x.name):
+            name = c.name[4:]  # strip "mtg-" prefix
+            # Try to read config from BASE_DIR; gracefully ignore if not found
+            user_dir = BASE_DIR / name
+            cfg = _read_config(user_dir) if user_dir.is_dir() else {"secret": None, "port": None}
+            # Fallback: read port from container port bindings
+            if cfg["port"] is None:
+                try:
+                    bindings = c.ports.get(f"{MTG_PORT}/tcp") or []
+                    if bindings:
+                        cfg["port"] = int(bindings[0]["HostPort"])
+                except Exception:
+                    pass
             running = c.status == "running"
-        elif sdk_ok:
-            running = False  # SDK works, container genuinely not found → stopped
-        else:
-            running = _container_running_cli(f"mtg-{name}")  # SDK failed → CLI fallback
-        print(f"[compute]   {name}: container={'mtg-'+name if c else 'NOT FOUND'}, status={c.status if c else 'n/a'}, running={running}")
-        devices  = _connections(c) if (running and c is not None) else 0
-        traffic  = _traffic(c)     if (running and c is not None) else {"rx": "—", "tx": "—", "rx_bytes": 0, "tx_bytes": 0}
-        result.append({
-            "name":        name,
-            "port":        cfg["port"],
-            "secret":      cfg["secret"],
-            "running":     running,
-            "status":      c.status if c else "stopped",
-            "connections": devices,
-            "is_online":   devices > 0,
-            "traffic":     traffic,
-        })
+            print(f"[compute]   {name}: status={c.status}, running={running}")
+            devices = _connections(c) if running else 0
+            traffic = _traffic(c)     if running else {"rx": "—", "tx": "—", "rx_bytes": 0, "tx_bytes": 0}
+            result.append({
+                "name":        name,
+                "port":        cfg["port"],
+                "secret":      cfg["secret"],
+                "running":     running,
+                "status":      c.status,
+                "connections": devices,
+                "is_online":   devices > 0,
+                "traffic":     traffic,
+            })
+    else:
+        # CLI fallback when Docker SDK unavailable: scan BASE_DIR + docker inspect
+        BASE_DIR.mkdir(parents=True, exist_ok=True)
+        for user_dir in sorted(BASE_DIR.iterdir()):
+            if not user_dir.is_dir():
+                continue
+            name    = user_dir.name
+            cfg     = _read_config(user_dir)
+            running = _container_running_cli(f"mtg-{name}")
+            print(f"[compute]   {name}: CLI fallback, running={running}")
+            result.append({
+                "name":        name,
+                "port":        cfg["port"],
+                "secret":      cfg["secret"],
+                "running":     running,
+                "status":      "running" if running else "stopped",
+                "connections": 0,
+                "is_online":   False,
+                "traffic":     {"rx": "—", "tx": "—", "rx_bytes": 0, "tx_bytes": 0},
+            })
     return result
 
 
