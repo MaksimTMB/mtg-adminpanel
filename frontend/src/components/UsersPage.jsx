@@ -1,13 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api.js';
 import { toast } from '../toast.jsx';
-import { flagUrl, expiryBadge, fmtBytes } from '../utils.jsx';
+import { flagUrl, expiryBadge, fmtBytes, copyText } from '../utils.jsx';
 import AddUserModal from './AddUserModal.jsx';
 import EditModal from './EditModal.jsx';
 import QRModal from './QRModal.jsx';
 import * as I from '../icons.jsx';
-
-const copyText = (txt) => navigator.clipboard.writeText(txt).then(() => toast('Скопировано!', 'success'));
 
 export default function UsersPage({ node, onBack }) {
   const [users, setUsers]     = useState([]);
@@ -43,6 +41,15 @@ export default function UsersPage({ node, onBack }) {
       toast(`Синхронизировано: ${r.imported} новых из ${r.total}`, r.imported > 0 ? 'success' : 'info');
       loadUsers(true);
     } catch(e) { toast(e.message, 'error'); }
+  };
+
+  const copyLink = async (txt) => {
+    try {
+      await copyText(txt);
+      toast('Скопировано!', 'success');
+    } catch {
+      toast('Не удалось скопировать. Зажми ссылку и скопируй вручную.', 'error');
+    }
   };
 
   // Single polling interval — users endpoint now includes traffic
@@ -207,7 +214,7 @@ export default function UsersPage({ node, onBack }) {
                             onClick={() => toggle(u)} disabled={busy[u.name]} title={u.running ? 'Остановить' : 'Запустить'}>
                             {busy[u.name] ? <span className="spin spin-sm"/> : (u.running ? <I.Pause/> : <I.Play/>)}
                           </button>
-                          <button className="btn btn-icon btn-secondary btn-sm" onClick={() => copyText(u.link)} title="Копировать ссылку"><I.Copy/></button>
+                          <button className="btn btn-icon btn-secondary btn-sm" onClick={() => copyLink(u.link)} title="Копировать ссылку"><I.Copy/></button>
                           <button className="btn btn-icon btn-secondary btn-sm" onClick={() => setQrU(u)} title="QR-код"><I.QrCode/></button>
                           <button className="btn btn-icon btn-secondary btn-sm" onClick={() => setEditU(u)} title="Редактировать"><I.Edit/></button>
                           <button className="btn btn-icon btn-secondary btn-sm" onClick={() => resetTraffic(u)}
