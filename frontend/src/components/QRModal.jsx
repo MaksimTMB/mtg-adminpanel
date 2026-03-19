@@ -1,9 +1,18 @@
 import { QRCodeSVG } from 'qrcode.react';
 import { toast } from '../toast.jsx';
+import { copyText } from '../utils.jsx';
 import * as I from '../icons.jsx';
 
 export default function QRModal({ user, onClose }) {
-  const copy = () => navigator.clipboard.writeText(user.link).then(() => toast('Скопировано!', 'success'));
+  const copy = async () => {
+    try {
+      await copyText(user.link);
+      toast('Скопировано!', 'success');
+    } catch {
+      toast('Не удалось скопировать. Зажми ссылку и скопируй вручную.', 'error');
+    }
+  };
+
   return (
     <div className="overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal" style={{maxWidth:320}}>
@@ -15,9 +24,9 @@ export default function QRModal({ user, onClose }) {
           <div style={{display:'inline-block',padding:16,background:'#fff',borderRadius:12,marginBottom:14}}>
             <QRCodeSVG value={user.link} size={200} level="M"/>
           </div>
-          <div className="link-box" style={{maxWidth:'100%',justifyContent:'center'}} onClick={copy}>
+          <button type="button" className="link-box" style={{maxWidth:'100%',justifyContent:'center',width:'100%'}} onClick={copy}>
             <I.Copy/><span className="link-txt">{user.link}</span>
-          </div>
+          </button>
           <p style={{fontSize:11,color:'var(--t3)',marginTop:8}}>Нажми на ссылку чтобы скопировать</p>
         </div>
         <div className="modal-foot">

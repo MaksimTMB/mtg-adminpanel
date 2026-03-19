@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api.js';
 import { toast } from '../toast.jsx';
+import { copyText } from '../utils.jsx';
 import FlagPicker from './FlagPicker.jsx';
 import * as I from '../icons.jsx';
 
@@ -58,6 +59,15 @@ export default function NodeModal({ node, onClose, onSave }) {
   };
 
   const installCmd = `mkdir -p /opt/mtg-agent && cd /opt/mtg-agent && curl -fsSL https://raw.githubusercontent.com/MaksimTMB/mtg-adminpanel/dev/mtg-agent/install-agent.sh | bash`;
+
+  const copyInstallCmd = async () => {
+    try {
+      await copyText(installCmd);
+      toast('Скопировано!', 'success');
+    } catch {
+      toast('Не удалось скопировать. Скопируй команду вручную.', 'error');
+    }
+  };
 
   return (
     <div className="overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -144,8 +154,7 @@ export default function NodeModal({ node, onClose, onSave }) {
                     lineHeight:1.6,background:'var(--bg)',padding:'8px 10px',borderRadius:7,border:'1px solid var(--b1)'}}>
                     {installCmd}
                   </code>
-                  <button className="btn btn-ghost btn-sm" style={{flexShrink:0}}
-                    onClick={() => navigator.clipboard.writeText(installCmd).then(() => toast('Скопировано!','success'))}>
+                  <button className="btn btn-ghost btn-sm" style={{flexShrink:0}} onClick={copyInstallCmd}>
                     <I.Copy/>
                   </button>
                 </div>
