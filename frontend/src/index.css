@@ -295,6 +295,7 @@ tbody tr:hover td { background: rgba(124,111,247,0.04); }
   border: 1px solid var(--b1); border-radius: 7px; padding: 6px 10px;
   font-family: var(--mono); font-size: 11px; color: var(--cy);
   cursor: pointer; transition: all var(--tx); max-width: 280px;
+  appearance: none; -webkit-appearance: none; text-align: left; width: auto;
 }
 .link-box:hover { border-color: var(--vi); background: var(--card); }
 .link-box svg { width: 11px; height: 11px; flex-shrink: 0; }

@@ -1,10 +1,54 @@
 export const flagUrl = (code, size = 'w40') =>
   code ? `https://flagcdn.com/${size}/${code}.png` : null;
 
-export const copyText = (txt) =>
-  navigator.clipboard.writeText(txt).then(() => {
-    // toast imported dynamically to avoid circular deps — caller handles it
-  });
+export async function copyText(txt) {
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(txt);
+      return true;
+    } catch {}
+  }
+
+  const input = document.createElement('textarea');
+  input.value = txt;
+  input.setAttribute('readonly', '');
+  input.style.position = 'fixed';
+  input.style.top = '0';
+  input.style.left = '0';
+  input.style.opacity = '0';
+  input.style.pointerEvents = 'none';
+
+  document.body.appendChild(input);
+
+  const selection = document.getSelection();
+  const savedRanges = [];
+
+  if (selection) {
+    for (let i = 0; i < selection.rangeCount; i++) {
+      savedRanges.push(selection.getRangeAt(i).cloneRange());
+    }
+  }
+
+  input.focus({ preventScroll: true });
+  input.select();
+  input.setSelectionRange(0, input.value.length);
+
+  let copied = false;
+  try {
+    copied = document.execCommand('copy');
+  } catch {}
+
+  document.body.removeChild(input);
+
+  if (selection) {
+    selection.removeAllRanges();
+    savedRanges.forEach(range => selection.addRange(range));
+  }
+
+  if (copied) return true;
+
+  throw new Error('copy_failed');
+}
 
 export function expiryBadge(expires_at, small) {
   if (!expires_at) return <span style={{color:'var(--t3)',fontSize:small?11:12}}>∞</span>;
