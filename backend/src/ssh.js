@@ -161,7 +161,7 @@ async function getRemoteUsers(node) {
       "  PID=$(docker inspect --format '{{.State.Pid}}' \"mtg-$NAME\" 2>/dev/null)",
       "  CONNS=0",
       "  if [ -n \"$PID\" ] && [ \"$PID\" != \"0\" ]; then",
-      "    CONNS=$(awk 'NR>1 && $4==\"01\" && substr($2,index($2,\":\")+1)==\"0C38\"{c++} END{print c+0}' /proc/$PID/net/tcp /proc/$PID/net/tcp6 2>/dev/null || echo 0)",
+      "    CONNS=$(awk 'NR>1 && $4==\"01\" && substr($2,index($2,\":\")+1)==\"0C38\"{split($3,a,\":\");ips[a[1]]=1} END{print length(ips)+0}' /proc/$PID/net/tcp6 2>/dev/null || awk 'NR>1 && $4==\"01\" && substr($2,index($2,\":\")+1)==\"0C38\"{split($3,a,\":\");ips[a[1]]=1} END{print length(ips)+0}' /proc/$PID/net/tcp 2>/dev/null || echo 0)",
       "  fi",
       '  echo "USER|$NAME|$PORT|$SECRET|${STATUS:-stopped}|$CONNS"',
       'done'
@@ -203,15 +203,34 @@ async function createRemoteUser(node, name) {
   if (node.agent_port) {
     try {
       const r = await agentPost(node, '/users', { name });
-      return { port: r.port, secret: r.secret };
+      // Validate agent response — port and secret must be present
+      if (r && r.port && r.secret) {
+        return { port: r.port, secret: r.secret };
+      }
+      // Agent returned success but with missing/null port or secret
+      // This can happen if agent's BASE_DIR is wrong — fall through to SSH
     } catch (e) {
-      if (e.message && e.message.includes('already exists')) throw new Error('User already exists on node');
-      // Fall through to SSH only if agent is unavailable (connection error)
-      if (!e.message.includes('already exists') && !e.message.includes('Invalid')) {
-        // Network error — try SSH
-      } else {
+      // Agent says user already exists on remote but NOT in DB (partial failure from
+      // a previous attempt). Recover by reading the user's port+secret from agent cache.
+      if (e.message && e.message.includes('already exists')) {
+        try {
+          const users = await agentGet(node, '/users');
+          const existing = Array.isArray(users) && users.find(u => u.name === name);
+          if (existing && existing.port && existing.secret) {
+            return { port: existing.port, secret: existing.secret };
+          }
+        } catch {}
+        // Can't recover port+secret from agent — fall through to SSH to read config files
+      }
+      // Invalid name format — always rethrow
+      if (e.message && e.message.includes('Invalid name')) {
         throw e;
       }
+      // If no SSH credentials configured, can't fall back — throw agent error directly
+      if (!node.ssh_key && !node.ssh_password) {
+        throw new Error(`Агент недоступен и SSH не настроен: ${e.message}`);
+      }
+      // Network errors, JSON issues, timeouts → fall through to SSH fallback
     }
   }
   // SSH fallback
@@ -231,7 +250,22 @@ async function createRemoteUser(node, name) {
     'echo "OK|$NAME|$PORT|$SECRET"'
   ].join('\n');
   const r = await sshExec(node, cmd);
-  if (r.output.includes('EXISTS')) throw new Error('User already exists on node');
+  if (r.output.includes('EXISTS')) {
+    // Remote dir exists but user not in DB — read existing config files to recover port+secret
+    const recoverCmd = [
+      'BASE=' + baseDir, 'NAME=' + name, 'USER_DIR="$BASE/$NAME"',
+      "SECRET=$(grep secret \"$USER_DIR/config.toml\" 2>/dev/null | awk -F'\"' '{print $2}')",
+      "PORT=$(grep -o '[0-9]*:3128' \"$USER_DIR/docker-compose.yml\" 2>/dev/null | cut -d: -f1)",
+      'echo "RECOVER|$PORT|$SECRET"'
+    ].join('\n');
+    const rec = await sshExec(node, recoverCmd);
+    const recLine = rec.output.split('\n').find(l => l.startsWith('RECOVER|'));
+    if (recLine) {
+      const [, rPort, rSecret] = recLine.split('|');
+      if (rPort && rSecret) return { port: parseInt(rPort), secret: rSecret };
+    }
+    throw new Error('User already exists on node');
+  }
   const okLine = r.output.split('\n').find(l => l.startsWith('OK|'));
   if (!okLine) throw new Error('Failed to create user: ' + r.output);
   const parts = okLine.split('|');
@@ -243,8 +277,8 @@ async function removeRemoteUser(node, name) {
     try {
       await agentDelete(node, `/users/${name}`);
       return;
-    } catch (e) {
-      if (!e.message.includes('timeout') && !e.message.includes('ECONNREFUSED')) throw e;
+    } catch (_) {
+      // Any agent error (not found, invalid JSON, timeout, etc.) — fall through to SSH
     }
   }
   // SSH fallback
@@ -254,6 +288,10 @@ async function removeRemoteUser(node, name) {
     'echo DONE'
   ].join('\n');
   await sshExec(node, cmd);
+  // Tell agent to evict this user from its cache (directory is already gone, agent returns OK)
+  if (node.agent_port) {
+    agentDelete(node, `/users/${name}`).catch(() => {});
+  }
 }
 
 async function stopRemoteUser(node, name) {

@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import docker
 
-app = FastAPI(title="MTG Agent", version="2.1.0")
+app = FastAPI(title="MTG Agent", version="2.2.1")
 
 AGENT_TOKEN  = os.environ.get("AGENT_TOKEN", "mtg-agent-secret")
 BASE_DIR     = Path("/opt/mtg/users")
@@ -68,22 +68,24 @@ def _connections(container) -> int:
         pid = container.attrs.get("State", {}).get("Pid", 0)
         if not pid:
             return 0
-        # Read both tcp and tcp6 — MTG binds IPv4 (appears in tcp only),
-        # but some kernels/configs use dual-stack (appears in tcp6 as IPv4-mapped).
-        lines = []
-        for fname in ("tcp", "tcp6"):
-            try:
-                lines += open(f"/proc/{pid}/net/{fname}").readlines()[1:]
-            except Exception:
-                pass
+        # Read both tcp6 and tcp. MTG binds to 0.0.0.0:3128 (IPv4-only socket) on some
+        # kernels → connections appear only in tcp, not tcp6.  On other kernels (IPv4-mapped
+        # dual-stack) they appear only in tcp6.  A connection is always in exactly ONE of the
+        # two files, so reading both with a set() is safe — no double-counting.
         ips = set()
-        for line in lines:
-            parts = line.split()
-            if len(parts) < 4:
+        for proc_net in [f"/proc/{pid}/net/tcp6", f"/proc/{pid}/net/tcp"]:
+            try:
+                lines = open(proc_net).readlines()[1:]
+            except Exception:
                 continue
-            local_port = parts[1].split(":")[1] if ":" in parts[1] else ""
-            if parts[3] == "01" and local_port == MTG_PORT_HEX:
-                ips.add(parts[2].rsplit(":", 1)[0])
+            for line in lines:
+                parts = line.split()
+                if len(parts) < 4:
+                    continue
+                local_port = parts[1].split(":")[1] if ":" in parts[1] else ""
+                if parts[3] == "01" and local_port == MTG_PORT_HEX:
+                    remote_ip = parts[2].rsplit(":", 1)[0]
+                    ips.add(remote_ip)
         return len(ips)
     except Exception:
         return 0
@@ -254,7 +256,7 @@ def _dc(user_dir: Path, *args):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "2.1.0"}
+    return {"status": "ok", "version": "2.2.1"}
 
 
 @app.get("/metrics")
@@ -303,7 +305,12 @@ async def create_user(body: CreateUserBody, x_agent_token: str = Header(default=
     port   = _next_port()
     secret = _generate_secret()
     _write_files(user_dir, name, port, secret)
-    _dc(user_dir, "up", "-d")
+    r = subprocess.run(["docker", "compose", "up", "-d"],
+                       cwd=str(user_dir), capture_output=True, text=True)
+    if r.returncode != 0:
+        # Clean up on failure so the dir doesn't block future attempts
+        shutil.rmtree(str(user_dir), ignore_errors=True)
+        raise HTTPException(status_code=500, detail=f"docker compose up failed: {r.stderr[-300:]}")
     # Invalidate cache so next read sees the new user
     _cache_ready.clear()
     asyncio.create_task(_refresh_once())
@@ -314,10 +321,12 @@ async def create_user(body: CreateUserBody, x_agent_token: str = Header(default=
 async def delete_user(name: str, x_agent_token: str = Header(default="")):
     auth(x_agent_token)
     user_dir = BASE_DIR / name
-    if not user_dir.exists():
-        raise HTTPException(status_code=404, detail="User not found")
-    _dc(user_dir, "down")
-    shutil.rmtree(str(user_dir), ignore_errors=True)
+    if user_dir.exists():
+        _dc(user_dir, "down")
+        shutil.rmtree(str(user_dir), ignore_errors=True)
+    # Always evict from cache and refresh — even if dir was already gone (SSH fallback case)
+    containers = [c for c in _cache.get("containers", []) if c["name"] != name]
+    _cache["containers"] = containers
     asyncio.create_task(_refresh_once())
     return JSONResponse({"ok": True})
 
