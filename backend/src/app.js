@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors    = require('cors');
+const https   = require('https');
 const path    = require('path');
 const crypto  = require('crypto');
 const db      = require('./db');
@@ -55,6 +56,40 @@ app.use(express.static(path.join(__dirname, '../public')));
 // ── Public endpoints (no auth) ────────────────────────────
 app.get('/api/version', (req, res) => {
   res.json({ version: pkgVersion });
+});
+
+app.get('/api/latest-release', (_req, res) => {
+  const request = https.get('https://api.github.com/repos/MaksimTMB/mtg-adminpanel/releases/latest', {
+    headers: {
+      'Accept': 'application/vnd.github+json',
+      'User-Agent': 'mtg-adminpanel',
+    },
+    timeout: 5000,
+  }, (ghRes) => {
+    let body = '';
+
+    ghRes.on('data', chunk => { body += chunk; });
+    ghRes.on('end', () => {
+      if (ghRes.statusCode !== 200) {
+        return res.json({ tag: null, url: null });
+      }
+      try {
+        const data = JSON.parse(body);
+        return res.json({
+          tag: data.tag_name || null,
+          url: data.html_url || null,
+        });
+      } catch {
+        return res.json({ tag: null, url: null });
+      }
+    });
+  });
+
+  request.on('error', () => res.json({ tag: null, url: null }));
+  request.on('timeout', () => {
+    request.destroy();
+    res.json({ tag: null, url: null });
+  });
 });
 
 // ── TOTP Session store (SQLite-backed, 24h TTL) ───────────
