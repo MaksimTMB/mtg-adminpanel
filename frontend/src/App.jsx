@@ -172,15 +172,30 @@ export default function App() {
         {page === 'settings' && <Settings/>}
       </main>
 
-      <nav className="mobile-bar">
-        {NAV.map(item => (
-          <div key={item.id} className={`mob-item ${page === item.id ? 'active' : ''}`} onClick={() => nav(item.id)}>
-            {item.icon}<span className="mob-label">{item.label}</span>
-          </div>
-        ))}
-        <div className="mob-item mob-logout" onClick={() => { setToken(''); setTotpCode(''); setAuthed(false); }}>
+      <nav className="mobile-bar" aria-label="Мобильная навигация">
+        {NAV.map(item => {
+          const isActive =
+            page === item.id ||
+            (page === 'node' && item.id === 'nodes') ||
+            (page === 'users' && selNode && item.id === 'nodes');
+
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className={`mob-item ${isActive ? 'active' : ''}`}
+              onClick={() => nav(item.id)}
+              aria-current={isActive ? 'page' : undefined}>
+              {item.icon}<span className="mob-label">{item.label}</span>
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          className="mob-item mob-logout"
+          onClick={() => { setToken(''); setTotpCode(''); setAuthed(false); }}>
           <I.LogOut/><span className="mob-label">Выйти</span>
-        </div>
+        </button>
       </nav>
 
       <Toasts list={toasts}/>
