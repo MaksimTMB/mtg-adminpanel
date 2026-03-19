@@ -406,16 +406,10 @@ tbody tr:hover td { background: rgba(124,111,247,0.04); }
 .mob-item {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
   cursor: pointer; color: var(--t3); transition: color var(--tx); user-select: none;
-  -webkit-tap-highlight-color: transparent; appearance: none; -webkit-appearance: none;
-  background: transparent; border: 0; border-radius: 0; font: inherit; padding: 0;
-  min-width: 0; touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 .mob-item.active { color: var(--vi); }
 .mob-item svg { width: 20px; height: 20px; }
 .mob-label { font-size: 10px; font-weight: 500; }
 .mob-logout { color: var(--re) !important; opacity: 0.7; }
 .mob-logout:hover { opacity: 1; }
-.mob-item:focus-visible {
-  outline: 2px solid rgba(124,111,247,0.55);
-  outline-offset: -2px;
-}
