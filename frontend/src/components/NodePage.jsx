@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api.js';
 import { toast } from '../toast.jsx';
-import { flagUrl, expiryBadge } from '../utils.jsx';
+import { flagUrl, expiryBadge, copyText } from '../utils.jsx';
 import StatPill from './StatPill.jsx';
 import NodeModal from './NodeModal.jsx';
 import * as I from '../icons.jsx';
@@ -28,6 +28,15 @@ export default function NodePage({ node, onBack, onManage, onReload }) {
     const t = setInterval(loadData, 20000);
     return () => clearInterval(t);
   }, [loadData]);
+
+  const copyLink = async (txt) => {
+    try {
+      await copyText(txt);
+      toast('Скопировано!', 'success');
+    } catch {
+      toast('Не удалось скопировать. Зажми ссылку и скопируй вручную.', 'error');
+    }
+  };
 
   const isOnline    = status ? status.online : null;
   const active      = users.filter(u => u.running).length;
@@ -106,7 +115,7 @@ export default function NodePage({ node, onBack, onManage, onReload }) {
                       <td>{expiryBadge(u.expires_at)}</td>
                       <td>
                         <div className="acts">
-                          <button className="btn btn-icon btn-secondary btn-sm" onClick={() => navigator.clipboard.writeText(u.link).then(() => toast('Скопировано!','success'))} title="Копировать ссылку"><I.Copy/></button>
+                          <button className="btn btn-icon btn-secondary btn-sm" onClick={() => copyLink(u.link)} title="Копировать ссылку"><I.Copy/></button>
                           <button className="btn btn-icon btn-secondary btn-sm" onClick={() => onManage(node)} title="Управление клиентом"><I.Edit/></button>
                         </div>
                       </td>

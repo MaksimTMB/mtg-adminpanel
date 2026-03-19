@@ -1,10 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api.js';
 import { toast } from '../toast.jsx';
-import { flagUrl, expiryBadge, fmtBytes } from '../utils.jsx';
+import { flagUrl, expiryBadge, fmtBytes, copyText } from '../utils.jsx';
 import * as I from '../icons.jsx';
-
-const copyText = (txt) => navigator.clipboard.writeText(txt).then(() => toast('Скопировано!', 'success'));
 
 export default function AllUsers({ nodes, onSelectNode }) {
   const [groups, setGroups]         = useState({});
@@ -36,6 +34,15 @@ export default function AllUsers({ nodes, onSelectNode }) {
   const totalUsers  = Object.values(groups).reduce((a, u) => a + u.length, 0);
   const totalOnline = Object.values(groups).reduce((a, u) => a + u.filter(x => x.is_online).length, 0);
   const totalActive = Object.values(groups).reduce((a, u) => a + u.filter(x => x.running).length, 0);
+
+  const copyLink = async (txt) => {
+    try {
+      await copyText(txt);
+      toast('Скопировано!', 'success');
+    } catch {
+      toast('Не удалось скопировать. Зажми ссылку и скопируй вручную.', 'error');
+    }
+  };
 
   return (
     <div className="pg">
@@ -137,7 +144,7 @@ export default function AllUsers({ nodes, onSelectNode }) {
                             </td>
                             <td>
                               <div className="acts">
-                                <button className="btn btn-icon btn-secondary btn-sm" onClick={() => copyText(u.link)} title="Копировать ссылку"><I.Copy/></button>
+                                <button className="btn btn-icon btn-secondary btn-sm" onClick={() => copyLink(u.link)} title="Копировать ссылку"><I.Copy/></button>
                               </div>
                             </td>
                           </tr>
