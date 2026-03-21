@@ -62,23 +62,23 @@ export default function AllUsers({ nodes, onSelectNode }) {
             return (
               <div className="card" key={node.id}>
                 {/* Node header */}
-                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom: users.length ? 16 : 0}}>
-                  <div style={{display:'flex',alignItems:'center',gap:10}}>
+                <div className="all-users-node-head" style={{marginBottom: users.length ? 16 : 0}}>
+                  <div className="all-users-node-meta">
                     {node.flag
                       ? <img src={flagUrl(node.flag,'w80')} alt={node.flag} style={{width:30,height:22,objectFit:'cover',borderRadius:3,boxShadow:'0 1px 4px rgba(0,0,0,.3)',flexShrink:0}}/>
                       : <div className="node-icon" style={{width:30,height:30,borderRadius:7}}><I.Server/></div>}
-                    <div>
+                    <div className="all-users-node-meta-text">
                       <div style={{fontWeight:600,fontSize:14}}>{node.name}</div>
                       <div style={{fontSize:11,color:'var(--t3)',fontFamily:'var(--mono)'}}>{node.host}</div>
+                      {users.length > 0 && (
+                        <div className="all-users-node-badges">
+                          {online > 0 && <span className="badge badge-green"><span className="dot dot-live"/>{online} онлайн</span>}
+                          <span className="badge badge-purple">{active} / {users.length}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
-                  <div style={{display:'flex',alignItems:'center',gap:8}}>
-                    {users.length > 0 && (
-                      <div style={{display:'flex',gap:6}}>
-                        {online > 0 && <span className="badge badge-green"><span className="dot dot-live"/>{online} онлайн</span>}
-                        <span className="badge badge-purple">{active} / {users.length}</span>
-                      </div>
-                    )}
+                  <div className="all-users-node-actions">
                     <button className="btn btn-primary btn-sm" onClick={() => onSelectNode(node)}>
                       <I.Users/> Управление
                     </button>
