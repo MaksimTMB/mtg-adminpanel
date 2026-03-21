@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api.js';
 import { toast } from '../toast.jsx';
-import { flagUrl, expiryBadge, fmtBytes, copyText } from '../utils.jsx';
+import { flagUrl, expiryBadge, copyText } from '../utils.jsx';
 import * as I from '../icons.jsx';
 
 export default function AllUsers({ nodes, onSelectNode }) {
@@ -16,13 +16,7 @@ export default function AllUsers({ nodes, onSelectNode }) {
       const res = await Promise.all(nodes.map(async n => {
         try {
           const users = await api('GET', `/api/nodes/${n.id}/users`);
-          return [n.id, users.map(u => ({
-            ...u,
-            // prefer live traffic, fall back to DB snapshot
-            traffic: (u.traffic_rx || u.traffic_rx_snap)
-              ? { rx: u.traffic_rx || u.traffic_rx_snap, tx: u.traffic_tx || u.traffic_tx_snap, live: !!u.traffic_rx }
-              : null,
-          }))];
+          return [n.id, users];
         } catch { return [n.id, []]; }
       }));
       setGroups(Object.fromEntries(res));
@@ -68,23 +62,23 @@ export default function AllUsers({ nodes, onSelectNode }) {
             return (
               <div className="card" key={node.id}>
                 {/* Node header */}
-                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom: users.length ? 16 : 0}}>
-                  <div style={{display:'flex',alignItems:'center',gap:10}}>
+                <div className="all-users-node-head" style={{marginBottom: users.length ? 16 : 0}}>
+                  <div className="all-users-node-meta">
                     {node.flag
                       ? <img src={flagUrl(node.flag,'w80')} alt={node.flag} style={{width:30,height:22,objectFit:'cover',borderRadius:3,boxShadow:'0 1px 4px rgba(0,0,0,.3)',flexShrink:0}}/>
                       : <div className="node-icon" style={{width:30,height:30,borderRadius:7}}><I.Server/></div>}
-                    <div>
+                    <div className="all-users-node-meta-text">
                       <div style={{fontWeight:600,fontSize:14}}>{node.name}</div>
                       <div style={{fontSize:11,color:'var(--t3)',fontFamily:'var(--mono)'}}>{node.host}</div>
+                      {users.length > 0 && (
+                        <div className="all-users-node-badges">
+                          {online > 0 && <span className="badge badge-green"><span className="dot dot-live"/>{online} онлайн</span>}
+                          <span className="badge badge-purple">{active} / {users.length}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
-                  <div style={{display:'flex',alignItems:'center',gap:8}}>
-                    {users.length > 0 && (
-                      <div style={{display:'flex',gap:6}}>
-                        {online > 0 && <span className="badge badge-green"><span className="dot dot-live"/>{online} онлайн</span>}
-                        <span className="badge badge-purple">{active} / {users.length}</span>
-                      </div>
-                    )}
+                  <div className="all-users-node-actions">
                     <button className="btn btn-primary btn-sm" onClick={() => onSelectNode(node)}>
                       <I.Users/> Управление
                     </button>
@@ -116,19 +110,19 @@ export default function AllUsers({ nodes, onSelectNode }) {
                                 : <span style={{color:'var(--t3)',fontSize:12}}>офлайн</span>}
                             </td>
                             <td>
-                              {u.traffic
+                              {(u.current_traffic_rx_bytes > 0 || u.current_traffic_tx_bytes > 0)
                                 ? <span className="traf">
-                                    <span className="rx">↓{u.traffic.rx}</span>
-                                    <span className="tx"> ↑{u.traffic.tx}</span>
-                                    {!u.traffic.live && <span style={{fontSize:10,color:'var(--t3)',marginLeft:3}} title="Данные на момент остановки">⏸</span>}
+                                    <span className="rx">↓{u.current_traffic_rx}</span>
+                                    <span className="tx"> ↑{u.current_traffic_tx}</span>
+                                    {!u.running && <span style={{fontSize:10,color:'var(--t3)',marginLeft:3}} title="Сохранено между остановками">⏸</span>}
                                   </span>
                                 : <span style={{color:'var(--t3)',fontSize:11}}>—</span>}
                             </td>
                             <td>
-                              {(u.total_traffic_rx_bytes > 0 || u.total_traffic_tx_bytes > 0)
+                              {(u.lifetime_traffic_rx_bytes > 0 || u.lifetime_traffic_tx_bytes > 0)
                                 ? <span className="traf" title="Накопленный трафик за все периоды">
-                                    <span className="rx">↓{fmtBytes(u.total_traffic_rx_bytes)}</span>
-                                    <span className="tx"> ↑{fmtBytes(u.total_traffic_tx_bytes)}</span>
+                                    <span className="rx">↓{u.lifetime_traffic_rx}</span>
+                                    <span className="tx"> ↑{u.lifetime_traffic_tx}</span>
                                   </span>
                                 : <span style={{color:'var(--t3)',fontSize:11}}>—</span>}
                             </td>

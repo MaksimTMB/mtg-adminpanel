@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api.js';
 import { toast } from '../toast.jsx';
-import { flagUrl, expiryBadge, fmtBytes, copyText } from '../utils.jsx';
+import { flagUrl, expiryBadge, copyText } from '../utils.jsx';
 import AddUserModal from './AddUserModal.jsx';
 import EditModal from './EditModal.jsx';
 import QRModal from './QRModal.jsx';
@@ -15,22 +15,11 @@ export default function UsersPage({ node, onBack }) {
   const [busy, setBusy]       = useState({});
   const [editU, setEditU]     = useState(null);
   const [qrU, setQrU]         = useState(null);
-  const [traffic, setTraffic] = useState({});
-
   const loadUsers = useCallback(async (silent = false) => {
     if (!silent) setLoading(true); else setRef(true);
     try {
       const u = await api('GET', `/api/nodes/${node.id}/users`);
       setUsers(u);
-      // Build traffic map: prefer live data, fall back to DB snapshot
-      const t = {};
-      for (const user of u) {
-        if (user.traffic_rx)
-          t[user.name] = { rx: user.traffic_rx, tx: user.traffic_tx || '—', live: true };
-        else if (user.traffic_rx_snap)
-          t[user.name] = { rx: user.traffic_rx_snap, tx: user.traffic_tx_snap || '—', live: false };
-      }
-      setTraffic(t);
     }
     finally { setLoading(false); setRef(false); }
   }, [node.id]);
@@ -101,6 +90,23 @@ export default function UsersPage({ node, onBack }) {
     finally { setBusyFor(user.name + '_reset', false); }
   };
 
+  const periodLabel = (u) => (
+    <span className="traf">
+      <span className="rx">↓{u.current_traffic_rx || '0B'}</span>
+      <span className="tx"> ↑{u.current_traffic_tx || '0B'}</span>
+      {!u.running && (u.current_traffic_rx_bytes > 0 || u.current_traffic_tx_bytes > 0) && (
+        <span style={{fontSize:10,color:'var(--t3)',marginLeft:4}} title="Сохранено между остановками">⏸</span>
+      )}
+    </span>
+  );
+
+  const totalLabel = (u) => (
+    <span className="traf" title="Накопленный трафик за всё время, включая текущий период">
+      <span className="rx">↓{u.lifetime_traffic_rx || '0B'}</span>
+      <span className="tx"> ↑{u.lifetime_traffic_tx || '0B'}</span>
+    </span>
+  );
+
   return (
     <div className="pg">
       <div className="topbar">
@@ -124,7 +130,7 @@ export default function UsersPage({ node, onBack }) {
 
       <div className="card">
         {loading ? <div className="loading-center"><span className="spin"/> Загружаю...</div> : (
-          <div className="table-wrap">
+          <div className="table-wrap user-table-desktop">
             <table>
               <thead><tr>
                 <th>Клиент</th>
@@ -139,8 +145,6 @@ export default function UsersPage({ node, onBack }) {
               </tr></thead>
               <tbody>
                 {users.map(u => {
-                  // live data preferred, snapshot as fallback
-                  const traf    = traffic[u.name] || null;
                   const devLimit = u.max_devices;
                   const devOver  = devLimit && u.connections > devLimit;
                   return (
@@ -174,22 +178,15 @@ export default function UsersPage({ node, onBack }) {
 
                       {/* Трафик: live или snapshot */}
                       <td>
-                        {traf
-                          ? <span className="traf">
-                              <span className="rx">↓{traf.rx}</span>
-                              <span className="tx"> ↑{traf.tx}</span>
-                              {!traf.live && <span style={{fontSize:10,color:'var(--t3)',marginLeft:4}} title="Данные на момент остановки">⏸</span>}
-                            </span>
+                        {(u.current_traffic_rx_bytes > 0 || u.current_traffic_tx_bytes > 0)
+                          ? periodLabel(u)
                           : <span style={{color:'var(--t3)',fontSize:12}}>—</span>}
                       </td>
 
                       {/* Всего за всё время */}
                       <td>
-                        {(u.total_traffic_rx_bytes > 0 || u.total_traffic_tx_bytes > 0)
-                          ? <span className="traf" title="Накопленный трафик за все периоды">
-                              <span className="rx">↓{fmtBytes(u.total_traffic_rx_bytes)}</span>
-                              <span className="tx"> ↑{fmtBytes(u.total_traffic_tx_bytes)}</span>
-                            </span>
+                        {(u.lifetime_traffic_rx_bytes > 0 || u.lifetime_traffic_tx_bytes > 0)
+                          ? totalLabel(u)
                           : <span style={{color:'var(--t3)',fontSize:12}}>—</span>}
                       </td>
 
@@ -233,6 +230,84 @@ export default function UsersPage({ node, onBack }) {
           </div>
         )}
       </div>
+
+      {!loading && (
+        <div className="mobile-user-list">
+          {users.map(u => {
+            const devLimit = u.max_devices;
+            const devOver  = devLimit && u.connections > devLimit;
+            return (
+              <div className="mobile-user-card card" key={`mobile-${u.id}`}>
+                <div className="mobile-user-head">
+                  <div>
+                    <div className="mobile-user-name">{u.name}</div>
+                    <div className="mobile-user-port">Порт {u.port}</div>
+                  </div>
+                  <div style={{display:'flex',flexDirection:'column',gap:6,alignItems:'flex-end'}}>
+                    <span className={`badge ${u.running ? 'badge-green' : 'badge-red'}`}>
+                      <span className={`dot ${u.running ? 'dot-live' : ''}`}/>
+                      {u.running ? 'активен' : 'стоп'}
+                    </span>
+                    {u.expired && <span className="badge badge-amber">истёк</span>}
+                  </div>
+                </div>
+
+                <div className="mobile-user-grid">
+                  <div className="mobile-metric">
+                    <span className="mobile-metric-label">Подключения</span>
+                    {u.is_online
+                      ? <span className={`badge ${devOver ? 'badge-red' : 'badge-green'}`} title={devLimit ? `Лимит: ${devLimit}` : 'Без ограничений'}>
+                          <span className="dot dot-live"/>
+                          {u.connections}{devLimit ? ` / ${devLimit}` : ''} онлайн
+                        </span>
+                      : <span className="mobile-muted">офлайн</span>}
+                  </div>
+                  <div className="mobile-metric">
+                    <span className="mobile-metric-label">Текущий период</span>
+                    {(u.current_traffic_rx_bytes > 0 || u.current_traffic_tx_bytes > 0) ? periodLabel(u) : <span className="mobile-muted">—</span>}
+                  </div>
+                  <div className="mobile-metric">
+                    <span className="mobile-metric-label">Общий трафик</span>
+                    {(u.lifetime_traffic_rx_bytes > 0 || u.lifetime_traffic_tx_bytes > 0) ? totalLabel(u) : <span className="mobile-muted">—</span>}
+                  </div>
+                  <div className="mobile-metric">
+                    <span className="mobile-metric-label">Срок / лимиты</span>
+                    <div style={{display:'flex',flexDirection:'column',gap:4,alignItems:'flex-start'}}>
+                      {u.expires_at && <div>{expiryBadge(u.expires_at)}</div>}
+                      {u.traffic_limit_gb && <span style={{fontSize:11,color:'var(--t3)',fontFamily:'var(--mono)'}}>{u.traffic_limit_gb}GB</span>}
+                      {!u.expires_at && !u.traffic_limit_gb && <span className="mobile-muted">∞</span>}
+                      {u.traffic_reset_interval && u.traffic_reset_interval !== 'never' && (
+                        <span style={{fontSize:10,color:'var(--vi)'}} title={u.next_reset_at ? `Следующий: ${new Date(u.next_reset_at).toLocaleString('ru-RU')}` : ''}>
+                          ↺ {u.traffic_reset_interval === 'daily' ? 'день' : u.traffic_reset_interval === 'monthly' ? 'мес' : 'год'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {u.note && <div className="mobile-user-note">{u.note}</div>}
+
+                <div className="mobile-user-actions">
+                  <button className={`btn btn-sm ${u.running ? 'btn-ghost' : 'btn-primary'}`}
+                    onClick={() => toggle(u)} disabled={busy[u.name]} title={u.running ? 'Остановить' : 'Запустить'}>
+                    {busy[u.name] ? <span className="spin spin-sm"/> : (u.running ? <I.Pause/> : <I.Play/>)}
+                    {u.running ? 'Стоп' : 'Старт'}
+                  </button>
+                  <button className="btn btn-secondary btn-sm" onClick={() => copyLink(u.link)} title="Копировать ссылку"><I.Copy/> Ссылка</button>
+                  <button className="btn btn-secondary btn-sm" onClick={() => setQrU(u)} title="QR-код"><I.QrCode/> QR</button>
+                  <button className="btn btn-secondary btn-sm" onClick={() => setEditU(u)} title="Редактировать"><I.Edit/> Изм.</button>
+                  <button className="btn btn-secondary btn-sm" onClick={() => resetTraffic(u)}
+                    disabled={busy[u.name + '_reset']} title="Сбросить трафик (перезапуск прокси)">
+                    {busy[u.name + '_reset'] ? <span className="spin spin-sm"/> : <I.RefreshCw/>}
+                    Сброс
+                  </button>
+                  <button className="btn btn-danger btn-sm" onClick={() => remove(u)} disabled={busy[u.name]} title="Удалить"><I.Trash/> Удалить</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {modal && <AddUserModal nodeId={node.id} onClose={() => setModal(false)} onSave={() => { setModal(false); loadUsers(true); }}/>}
       {qrU   && <QRModal user={qrU} onClose={() => setQrU(null)}/>}
