@@ -88,7 +88,7 @@ app.use('/api', (req, res, next) => {
   const token = req.headers['x-auth-token'] || req.query.token;
   if (token !== AUTH_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
   // TOTP validation — exempt setup/verify/status (needed to configure 2FA itself)
-  const totpExempt = ['/totp/setup', '/totp/verify', '/totp/status', '/totp/disable'];
+  const totpExempt = ['/totp/setup', '/totp/verify', '/totp/status', '/totp/disable', '/totp/session'];
   if (isTotpEnabled() && !totpExempt.some(p => req.path.startsWith(p))) {
     const code = req.headers['x-totp-code'];
     // Accept valid session token (issued after first TOTP verification)
@@ -142,6 +142,17 @@ app.post('/api/totp/verify', (req, res) => {
     _invalidateTotpCache();
     res.json({ ok: true });
   } else { res.status(400).json({ error: 'Invalid code' }); }
+});
+app.post('/api/totp/session', (req, res) => {
+  const token = req.headers['x-auth-token'];
+  if (token !== AUTH_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
+  const { code } = req.body;
+  const secret = getTotpSecret();
+  if (!secret || !isTotpEnabled()) return res.status(400).json({ error: '2FA disabled' });
+  if (!code || !authenticator.verify(code, secret)) {
+    return res.status(403).json({ error: 'Invalid code', totp: true });
+  }
+  res.json({ ok: true, session: _createTotpSession() });
 });
 app.post('/api/totp/disable', (req, res) => {
   const token = req.headers['x-auth-token'];
