@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { setToken, setTotpCode } from '../api.js';
+import { setToken, setTotpCode, setTotpSession, clearTotpAuth } from '../api.js';
 import { api } from '../api.js';
 import { toast } from '../toast.jsx';
 import * as I from '../icons.jsx';
@@ -16,6 +16,7 @@ export default function Login({ onLogin }) {
     setLoading(true);
     try {
       setToken(tok);
+      clearTotpAuth();
       const s = await fetch('/api/totp/status', { headers: { 'x-auth-token': tok } }).then(r => r.json());
       if (s.enabled) { setStep('totp'); }
       else { await api('GET', '/api/nodes'); toast('Вход выполнен', 'success'); onLogin(tok); }
@@ -29,11 +30,23 @@ export default function Login({ onLogin }) {
     setLoading(true);
     try {
       setTotpCode(totp);
+      const r = await fetch('/api/totp/session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-auth-token': tok,
+        },
+        body: JSON.stringify({ code: totp }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data.session) throw new Error(data.error || 'TOTP session failed');
+      setTotpSession(data.session);
+      setTotpCode('');
       await api('GET', '/api/nodes');
       toast('Вход выполнен', 'success');
       onLogin(tok);
     } catch {
-      setTotpCode('');
+      clearTotpAuth();
       setTotp('');
       toast('Неверный код 2FA', 'error');
     }

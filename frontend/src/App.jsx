@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { api, getToken, setToken, setTotpCode, setTotpRequiredHandler } from './api.js';
+import { api, getToken, setToken, setTotpCode, setTotpSession, clearTotpAuth, setTotpRequiredHandler } from './api.js';
 import { useToast, Toasts } from './toast.jsx';
 import Login from './components/Login.jsx';
 import Dashboard from './components/Dashboard.jsx';
@@ -19,12 +19,23 @@ function TotpOverlay({ onDone }) {
   const submit = async e => {
     e.preventDefault();
     if (code.length !== 6) return;
-    setTotpCode(code);
     try {
+      const r = await fetch('/api/totp/session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-auth-token': getToken(),
+        },
+        body: JSON.stringify({ code }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data.session) throw new Error(data.error || 'TOTP session failed');
+      setTotpSession(data.session);
+      setTotpCode('');
       await api('GET', '/api/nodes');
       onDone();
     } catch {
-      setTotpCode('');
+      clearTotpAuth();
       setCode('');
       setErr(true);
     }
@@ -81,14 +92,14 @@ export default function App() {
   }, []);
 
   const loadNodes = useCallback(async () => {
-    try { const n = await api('GET', '/api/nodes'); setNodes(n || []); } catch {}
-  }, []);
-
-  const loadCounts = useCallback(async (list) => {
     try {
-      // DB-only endpoint — no SSH/agent calls, instant response
-      const counts = await api('GET', '/api/nodes/counts');
-      setNodes(list.map(n => ({ ...n, _userCount: counts[n.id] || 0 })));
+      const n = await api('GET', '/api/nodes');
+      const list = n || [];
+      setNodes(list);
+      if (list.length) {
+        const counts = await api('GET', '/api/nodes/counts');
+        setNodes(list.map(node => ({ ...node, _userCount: counts[node.id] || 0 })));
+      }
     } catch {}
   }, []);
 
@@ -99,7 +110,6 @@ export default function App() {
   }, []);
 
   useEffect(() => { if (authed) loadNodes(); }, [authed]);
-  useEffect(() => { if (nodes.length) loadCounts(nodes); }, [nodes.length]);
 
   const nav = (p) => { setPage(p); setSelNode(null); setSelNodeView(null); };
   const selectNode   = (n) => { setSelNode(n); setPage('users'); };
@@ -150,7 +160,7 @@ export default function App() {
 
         <div className="sidebar-footer">
           <button className="btn btn-ghost btn-sm" style={{width:'100%',justifyContent:'center',marginTop:8}}
-            onClick={() => { setToken(''); setTotpCode(''); setAuthed(false); }}>
+            onClick={() => { setToken(''); clearTotpAuth(); setAuthed(false); }}>
             <I.LogOut/> Выйти
           </button>
         </div>
