@@ -39,7 +39,11 @@ export async function api(method, path, body) {
         setTotpSession(session);
         setTotpCode('');
       }
-      if (r.status === 401) { setToken(''); throw new Error('Unauthorized'); }
+      if (r.status === 401) {
+        setToken('');
+        clearTotpAuth();
+        throw new Error('Unauthorized');
+      }
       if (r.status === 403) {
         const d = await r.json().catch(() => ({}));
         if (d.totp) {

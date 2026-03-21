@@ -395,6 +395,7 @@ app.get('/api/nodes/:id/users', (req, res) => {
   for (const remote of remoteUsers) {
     const dbUser = dbUsers.find(u => u.name === remote.name);
     if (dbUser && dbUser.max_devices && (remote.connections || 0) > dbUser.max_devices) {
+      persistTrafficCarry(req.params.id, remote.name, remote.traffic || null);
       ssh.stopRemoteUser(node, remote.name).catch(() => {});
       db.prepare('UPDATE users SET status=? WHERE node_id=? AND name=?').run('stopped', req.params.id, remote.name);
       remote.status = 'stopped'; remote.connections = 0;
