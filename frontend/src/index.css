@@ -218,6 +218,32 @@ body {
 .node-icon svg { width: 18px; height: 18px; color: var(--vi); }
 
 .table-wrap { overflow-x: auto; }
+
+.all-users-node-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.all-users-node-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.all-users-node-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.all-users-node-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th {
   text-align: left; padding: 11px 14px; color: var(--t3); font-weight: 500;
