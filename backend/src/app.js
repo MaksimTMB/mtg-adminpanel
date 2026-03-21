@@ -36,6 +36,8 @@ function runMigrations() {
     "ALTER TABLE users ADD COLUMN next_reset_at DATETIME DEFAULT NULL",
     "ALTER TABLE users ADD COLUMN total_traffic_rx_bytes INTEGER DEFAULT 0",
     "ALTER TABLE users ADD COLUMN total_traffic_tx_bytes INTEGER DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN traffic_carry_rx_bytes INTEGER DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN traffic_carry_tx_bytes INTEGER DEFAULT 0",
   ];
   for (const sql of migrations) {
     try { db.prepare(sql).run(); } catch (_) {}
@@ -86,7 +88,7 @@ app.use('/api', (req, res, next) => {
   const token = req.headers['x-auth-token'] || req.query.token;
   if (token !== AUTH_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
   // TOTP validation — exempt setup/verify/status (needed to configure 2FA itself)
-  const totpExempt = ['/totp/setup', '/totp/verify', '/totp/status', '/totp/disable'];
+  const totpExempt = ['/totp/setup', '/totp/verify', '/totp/status', '/totp/disable', '/totp/session'];
   if (isTotpEnabled() && !totpExempt.some(p => req.path.startsWith(p))) {
     const code = req.headers['x-totp-code'];
     // Accept valid session token (issued after first TOTP verification)
@@ -140,6 +142,17 @@ app.post('/api/totp/verify', (req, res) => {
     _invalidateTotpCache();
     res.json({ ok: true });
   } else { res.status(400).json({ error: 'Invalid code' }); }
+});
+app.post('/api/totp/session', (req, res) => {
+  const token = req.headers['x-auth-token'];
+  if (token !== AUTH_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
+  const { code } = req.body;
+  const secret = getTotpSecret();
+  if (!secret || !isTotpEnabled()) return res.status(400).json({ error: '2FA disabled' });
+  if (!code || !authenticator.verify(code, secret)) {
+    return res.status(403).json({ error: 'Invalid code', totp: true });
+  }
+  res.json({ ok: true, session: _createTotpSession() });
 });
 app.post('/api/totp/disable', (req, res) => {
   const token = req.headers['x-auth-token'];
@@ -285,6 +298,7 @@ app.get('/api/nodes/:id/summary', (req, res) => {
   }
 
   function mkUser(u, r) {
+    const trafficState = buildTrafficState(u, r?.traffic || null);
     return {
       ...u,
       port:        r?.port        || u.port,
@@ -293,6 +307,14 @@ app.get('/api/nodes/:id/summary', (req, res) => {
       connections: r?.connections || 0,
       is_online:   (r?.connections || 0) > 0,
       traffic:     r?.traffic     || null,
+      current_traffic_rx_bytes: trafficState.current.rxBytes,
+      current_traffic_tx_bytes: trafficState.current.txBytes,
+      current_traffic_rx: bytesToSize(trafficState.current.rxBytes),
+      current_traffic_tx: bytesToSize(trafficState.current.txBytes),
+      lifetime_traffic_rx_bytes: trafficState.lifetime.rxBytes,
+      lifetime_traffic_tx_bytes: trafficState.lifetime.txBytes,
+      lifetime_traffic_rx: bytesToSize(trafficState.lifetime.rxBytes),
+      lifetime_traffic_tx: bytesToSize(trafficState.lifetime.txBytes),
       link: `tg://proxy?server=${node.host}&port=${u.port}&secret=${u.secret}`,
       expired: u.expires_at ? new Date(u.expires_at) < new Date() : false,
     };
@@ -346,20 +368,34 @@ app.get('/api/nodes/:id/users', (req, res) => {
   const remoteUsers = nodeCache.get(node.id).remoteUsers;
 
   const mkUser = (u, remote) => ({
-    ...u,
-    connections: remote?.connections || 0,
-    running: remote ? (remote.running === true || (remote.status || '').includes('Up')) : false,
-    is_online: (remote?.connections || 0) > 0,
-    traffic_rx: remote?.traffic?.rx || null,
-    traffic_tx: remote?.traffic?.tx || null,
-    link: `tg://proxy?server=${node.host}&port=${u.port}&secret=${u.secret}`,
-    expired: u.expires_at ? new Date(u.expires_at) < new Date() : false,
+    ...(() => {
+      const trafficState = buildTrafficState(u, remote?.traffic || null);
+      return {
+        ...u,
+        connections: remote?.connections || 0,
+        running: remote ? (remote.running === true || (remote.status || '').includes('Up')) : false,
+        is_online: (remote?.connections || 0) > 0,
+        traffic_rx: remote?.traffic?.rx || null,
+        traffic_tx: remote?.traffic?.tx || null,
+        current_traffic_rx_bytes: trafficState.current.rxBytes,
+        current_traffic_tx_bytes: trafficState.current.txBytes,
+        current_traffic_rx: bytesToSize(trafficState.current.rxBytes),
+        current_traffic_tx: bytesToSize(trafficState.current.txBytes),
+        lifetime_traffic_rx_bytes: trafficState.lifetime.rxBytes,
+        lifetime_traffic_tx_bytes: trafficState.lifetime.txBytes,
+        lifetime_traffic_rx: bytesToSize(trafficState.lifetime.rxBytes),
+        lifetime_traffic_tx: bytesToSize(trafficState.lifetime.txBytes),
+        link: `tg://proxy?server=${node.host}&port=${u.port}&secret=${u.secret}`,
+        expired: u.expires_at ? new Date(u.expires_at) < new Date() : false,
+      };
+    })()
   });
 
   // Device limit enforcement (async, doesn't block response)
   for (const remote of remoteUsers) {
     const dbUser = dbUsers.find(u => u.name === remote.name);
     if (dbUser && dbUser.max_devices && (remote.connections || 0) > dbUser.max_devices) {
+      persistTrafficCarry(req.params.id, remote.name, remote.traffic || null);
       ssh.stopRemoteUser(node, remote.name).catch(() => {});
       db.prepare('UPDATE users SET status=? WHERE node_id=? AND name=?').run('stopped', req.params.id, remote.name);
       remote.status = 'stopped'; remote.connections = 0;
@@ -467,10 +503,7 @@ app.post('/api/nodes/:id/users/:name/stop', async (req, res) => {
     // Save traffic snapshot from cache before stopping
     const cached = nodeCache.get(node.id);
     const cachedUser = cached.remoteUsers.find(u => u.name === req.params.name);
-    if (cachedUser?.traffic) {
-      db.prepare('UPDATE users SET traffic_rx_snap=?, traffic_tx_snap=? WHERE node_id=? AND name=?')
-        .run(cachedUser.traffic.rx, cachedUser.traffic.tx, req.params.id, req.params.name);
-    }
+    persistTrafficCarry(req.params.id, req.params.name, cachedUser?.traffic || null);
     await ssh.stopRemoteUser(node, req.params.name);
     db.prepare('UPDATE users SET status=? WHERE node_id=? AND name=?').run('stopped', req.params.id, req.params.name);
     nodeCache.refresh(node);
@@ -497,20 +530,11 @@ app.post('/api/nodes/:id/users/:name/reset-traffic', async (req, res) => {
     // Accumulate current live traffic into total before resetting
     const cached = nodeCache.get(node.id);
     const cachedUser = cached?.remoteUsers?.find(u => u.name === req.params.name);
-    if (cachedUser?.traffic) {
-      const u = db.prepare('SELECT total_traffic_rx_bytes, total_traffic_tx_bytes FROM users WHERE node_id=? AND name=?')
-        .get(req.params.id, req.params.name);
-      if (u) {
-        db.prepare('UPDATE users SET total_traffic_rx_bytes=?, total_traffic_tx_bytes=? WHERE node_id=? AND name=?')
-          .run(parseBytes(cachedUser.traffic.rx) + (u.total_traffic_rx_bytes || 0),
-               parseBytes(cachedUser.traffic.tx) + (u.total_traffic_tx_bytes || 0),
-               req.params.id, req.params.name);
-      }
-    }
+    flushCurrentTrafficToLifetime(req.params.id, req.params.name, cachedUser?.traffic || null);
     await ssh.restartRemoteUser(node, req.params.name);
     db.prepare(`UPDATE users SET
       traffic_reset_at=datetime('now'), traffic_rx_snap=NULL, traffic_tx_snap=NULL,
-      status='active' WHERE node_id=? AND name=?`
+      traffic_carry_rx_bytes=0, traffic_carry_tx_bytes=0, status='active' WHERE node_id=? AND name=?`
     ).run(req.params.id, req.params.name);
     nodeCache.refresh(node);
     res.json({ ok: true });
@@ -583,6 +607,84 @@ function parseBytes(str) {
   return Math.round(v);
 }
 
+function bytesToSize(bytes) {
+  const value = Number(bytes) || 0;
+  if (value <= 0) return '0B';
+  if (value >= 1073741824) return `${trimDecimals(value / 1073741824)}GB`;
+  if (value >= 1048576) return `${trimDecimals(value / 1048576)}MB`;
+  if (value >= 1024) return `${trimDecimals(value / 1024)}KB`;
+  return `${Math.round(value)}B`;
+}
+
+function trimDecimals(num) {
+  return Number(num.toFixed(num >= 10 ? 1 : 2)).toString();
+}
+
+function buildTrafficState(user, liveTraffic = null) {
+  const carryRx = user?.traffic_carry_rx_bytes || 0;
+  const carryTx = user?.traffic_carry_tx_bytes || 0;
+  const liveRx = liveTraffic?.rx ? parseBytes(liveTraffic.rx) : 0;
+  const liveTx = liveTraffic?.tx ? parseBytes(liveTraffic.tx) : 0;
+  const snapRx = !liveRx && !carryRx && user?.traffic_rx_snap ? parseBytes(user.traffic_rx_snap) : 0;
+  const snapTx = !liveTx && !carryTx && user?.traffic_tx_snap ? parseBytes(user.traffic_tx_snap) : 0;
+  const currentRx = carryRx + (liveRx || snapRx);
+  const currentTx = carryTx + (liveTx || snapTx);
+  const totalRx = (user?.total_traffic_rx_bytes || 0) + currentRx;
+  const totalTx = (user?.total_traffic_tx_bytes || 0) + currentTx;
+
+  return {
+    current: { rxBytes: currentRx, txBytes: currentTx },
+    lifetime: { rxBytes: totalRx, txBytes: totalTx },
+  };
+}
+
+function persistTrafficCarry(nodeId, userName, liveTraffic = null) {
+  const user = db.prepare(`
+    SELECT traffic_carry_rx_bytes, traffic_carry_tx_bytes, traffic_rx_snap, traffic_tx_snap
+    FROM users WHERE node_id=? AND name=?
+  `).get(nodeId, userName);
+  if (!user) return;
+  const nextCarryRx = (user.traffic_carry_rx_bytes || 0) + (liveTraffic?.rx ? parseBytes(liveTraffic.rx) : 0);
+  const nextCarryTx = (user.traffic_carry_tx_bytes || 0) + (liveTraffic?.tx ? parseBytes(liveTraffic.tx) : 0);
+  db.prepare(`
+    UPDATE users SET
+      traffic_carry_rx_bytes=?,
+      traffic_carry_tx_bytes=?,
+      traffic_rx_snap=?,
+      traffic_tx_snap=?
+    WHERE node_id=? AND name=?
+  `).run(
+    nextCarryRx,
+    nextCarryTx,
+    bytesToSize(nextCarryRx),
+    bytesToSize(nextCarryTx),
+    nodeId,
+    userName
+  );
+}
+
+function flushCurrentTrafficToLifetime(nodeId, userName, liveTraffic = null) {
+  const user = db.prepare(`
+    SELECT total_traffic_rx_bytes, total_traffic_tx_bytes, traffic_carry_rx_bytes, traffic_carry_tx_bytes, traffic_rx_snap, traffic_tx_snap
+    FROM users WHERE node_id=? AND name=?
+  `).get(nodeId, userName);
+  if (!user) return;
+  const current = buildTrafficState(user, liveTraffic).current;
+  db.prepare(`
+    UPDATE users SET
+      total_traffic_rx_bytes=?,
+      total_traffic_tx_bytes=?,
+      traffic_carry_rx_bytes=0,
+      traffic_carry_tx_bytes=0
+    WHERE node_id=? AND name=?
+  `).run(
+    (user.total_traffic_rx_bytes || 0) + current.rxBytes,
+    (user.total_traffic_tx_bytes || 0) + current.txBytes,
+    nodeId,
+    userName
+  );
+}
+
 // ── Background jobs ───────────────────────────────────────
 
 // Fetch a single node's data and enforce limits/resets.
@@ -612,6 +714,7 @@ async function processNode(node) {
     if (dbUser.max_devices && conns > dbUser.max_devices) {
       console.log(`⚠️ Device limit: ${u.name}@${node.id} (${conns}/${dbUser.max_devices})`);
       try {
+        persistTrafficCarry(node.id, u.name, u.traffic || traffic[u.name] || null);
         await ssh.stopRemoteUser(node, u.name);
         db.prepare('UPDATE users SET status=? WHERE node_id=? AND name=?').run('stopped', node.id, u.name);
         console.log(`🛑 Stopped ${u.name}: device limit`);
@@ -620,17 +723,16 @@ async function processNode(node) {
 
     // Traffic limit enforcement
     if (dbUser.traffic_limit_gb && dbUser.status !== 'stopped') {
-      const t = traffic[u.name];
-      if (t) {
-        const totalBytes = parseBytes(t.rx) + parseBytes(t.tx);
-        if (totalBytes >= dbUser.traffic_limit_gb * 1073741824) {
-          console.log(`⚠️ Traffic limit: ${u.name}@${node.id} (${(totalBytes/1073741824).toFixed(2)}/${dbUser.traffic_limit_gb}GB)`);
+      const trafficState = buildTrafficState(dbUser, traffic[u.name] || null);
+      const periodTotalBytes = trafficState.current.rxBytes + trafficState.current.txBytes;
+      if (periodTotalBytes >= dbUser.traffic_limit_gb * 1073741824) {
+          console.log(`⚠️ Traffic limit: ${u.name}@${node.id} (${(periodTotalBytes/1073741824).toFixed(2)}/${dbUser.traffic_limit_gb}GB)`);
           try {
+            persistTrafficCarry(node.id, u.name, traffic[u.name] || null);
             await ssh.stopRemoteUser(node, u.name);
             db.prepare('UPDATE users SET status=? WHERE node_id=? AND name=?').run('stopped', node.id, u.name);
             console.log(`🛑 Stopped ${u.name}: traffic limit`);
           } catch (e) { console.error(`Stop failed (traffic limit) ${u.name}:`, e.message); }
-        }
       }
     }
   }
@@ -644,17 +746,13 @@ async function processNode(node) {
 
   for (const u of usersToReset) {
     try {
-      const t = traffic[u.name];
-      if (t) {
-        db.prepare('UPDATE users SET total_traffic_rx_bytes=?, total_traffic_tx_bytes=? WHERE id=?')
-          .run(parseBytes(t.rx) + (u.total_traffic_rx_bytes || 0),
-               parseBytes(t.tx) + (u.total_traffic_tx_bytes || 0), u.id);
-      }
+      flushCurrentTrafficToLifetime(node.id, u.name, traffic[u.name] || null);
       await ssh.stopRemoteUser(node, u.name);
       await ssh.startRemoteUser(node, u.name);
       const next = calcNextReset(u.traffic_reset_interval);
       db.prepare(`UPDATE users SET traffic_reset_at=datetime('now'), traffic_rx_snap=NULL,
-        traffic_tx_snap=NULL, next_reset_at=?, status='active' WHERE id=?`).run(next, u.id);
+        traffic_tx_snap=NULL, traffic_carry_rx_bytes=0, traffic_carry_tx_bytes=0,
+        next_reset_at=?, status='active' WHERE id=?`).run(next, u.id);
       console.log(`♻️ Traffic reset ${u.name}@${node.id}, next: ${next}`);
     } catch (e) { console.error(`Traffic reset failed ${u.name}:`, e.message); }
   }
@@ -682,6 +780,7 @@ async function stopExpiredUsers() {
     const node = db.prepare('SELECT * FROM nodes WHERE id=?').get(u.node_id);
     if (!node) return; // orphan user — leave it, admin will clean up
     try {
+      persistTrafficCarry(u.node_id, u.name, nodeCache.get(node.id).remoteUsers.find(r => r.name === u.name)?.traffic || null);
       await ssh.stopRemoteUser(node, u.name);
       db.prepare("UPDATE users SET status='stopped' WHERE id=?").run(u.id);
       console.log(`🛑 Auto-stopped expired user: ${u.name}@${u.node_id}`);

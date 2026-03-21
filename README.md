@@ -137,28 +137,89 @@
 
 ## Быстрый старт
 
+### Рекомендуемый способ — интерактивный `install.sh`
+
+Это основной и самый простой путь установки панели. Скрипт сам:
+- проверяет запуск от `root`,
+- обновляет систему,
+- ставит зависимости и Docker,
+- клонирует/обновляет репозиторий в `/opt/mtg-adminpanel`,
+- создаёт `.env`,
+- запускает `docker compose up -d --build`,
+- включает автозапуск через systemd,
+- при выборе SSL настраивает Nginx + Let's Encrypt.  
+
+Это поведение соответствует `install.sh`. 【F:install.sh†L45-L49】【F:install.sh†L114-L165】【F:install.sh†L174-L229】【F:install.sh†L232-L275】
+
+### Точная инструкция запуска установщика
+
 ```bash
 git clone https://github.com/MaksimTMB/mtg-adminpanel.git /opt/mtg-adminpanel
 cd /opt/mtg-adminpanel
-cp .env.example .env
-# Отредактируй .env: установи AUTH_TOKEN (пароль для входа)
-docker compose up -d
+sudo bash install.sh
 ```
 
-Панель доступна на `http://your-server:3000`
+### Что спросит скрипт
+
+Скрипт последовательно попросит ввести:
+1. **Токен авторизации** — это пароль входа в панель.
+2. **Порт панели** — по умолчанию `3000`.
+3. **Нужен ли SSL**:
+   - `1` — без SSL, панель будет доступна по `http://IP:PORT`
+   - `2` — с SSL через Nginx + Let's Encrypt, нужен домен
+4. Если выбран SSL:
+   - **домен**
+   - **email** для Let's Encrypt
+5. Подтверждение запуска установки: `y`
+
+Это полностью соответствует вопросам, которые задаёт `install.sh`. 【F:install.sh†L53-L110】
+
+### Что вы получите после установки
+
+- **Без SSL:** панель будет доступна по адресу вида `http://SERVER_IP:3000`.
+- **С SSL:** панель будет доступна по адресу вида `https://your-domain:8443`.
+- Текущий адрес и токен скрипт печатает в финале установки. 【F:install.sh†L255-L275】
+
+### Важно знать заранее
+
+- Скрипт нужно запускать **от root** или через `sudo bash install.sh`. 【F:install.sh†L45-L49】
+- Репозиторий ставится в `/opt/mtg-adminpanel`. 【F:install.sh†L18-L19】
+- Если Docker уже установлен — скрипт его повторно не ставит. 【F:install.sh†L124-L131】
+- Если папка `/opt/mtg-adminpanel` уже существует и это git-репозиторий — скрипт делает `git pull`. 【F:install.sh†L133-L147】
+- Скрипт создаёт `.env` автоматически, но только с `AUTH_TOKEN`, `PORT` и `DATA_DIR=/data`. Если вам нужен кастомный `AGENT_TOKEN`, его нужно потом явно поправить в `.env`. 【F:install.sh†L149-L159】【F:.env.example†L20-L27】
 
 ---
 
 ## Установка панели
 
-### 1. Клонировать репозиторий
+### Вариант A — установка через `install.sh` (рекомендуется)
+
+```bash
+git clone https://github.com/MaksimTMB/mtg-adminpanel.git /opt/mtg-adminpanel
+cd /opt/mtg-adminpanel
+sudo bash install.sh
+```
+
+После завершения установки полезно проверить:
+
+```bash
+systemctl status mtg-adminpanel --no-pager
+docker ps
+cat /opt/mtg-adminpanel/.env
+```
+
+### Вариант B — ручная установка без установщика
+
+Используйте этот путь только если вы **не хотите** интерактивный установщик и осознанно настраиваете всё вручную.
+
+#### 1. Клонировать репозиторий
 
 ```bash
 git clone https://github.com/MaksimTMB/mtg-adminpanel.git /opt/mtg-adminpanel
 cd /opt/mtg-adminpanel
 ```
 
-### 2. Настроить переменные окружения
+#### 2. Создать и отредактировать `.env`
 
 ```bash
 cp .env.example .env
@@ -167,21 +228,32 @@ nano .env
 
 Минимальная конфигурация:
 ```env
-AUTH_TOKEN=your-strong-password-here  # Обязательно: пароль для входа в панель
-AGENT_TOKEN=mtg-agent-secret          # Токен агента (должен совпадать на нодах)
-AGENT_PORT=8081                       # Порт агента на нодах
-PORT=3000                             # Порт веб-интерфейса
+AUTH_TOKEN=your-strong-password-here  # Пароль для входа в панель
+PORT=3000                             # Порт панели
+DATA_DIR=/data                        # База и данные панели
+AGENT_PORT=8081                       # Порт MTG Agent на нодах
+AGENT_TOKEN=mtg-agent-secret          # Должен совпадать с токеном на нодах
 ```
 
-### 3. Запустить
+Значения и назначение этих переменных описаны в `.env.example`. 【F:.env.example†L7-L27】
+
+#### 3. Запустить панель
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
-Панель доступна на `http://your-server:3000`
+#### 4. Проверить, что панель поднялась
 
-### 4. Настроить обратный прокси (рекомендуется)
+```bash
+docker ps
+docker logs mtg-panel --tail=50
+```
+
+#### 5. Доступ к панели
+
+- без reverse proxy: `http://your-server:3000`
+- с reverse proxy: проксируйте `localhost:3000`
 
 **Nginx:**
 ```nginx
@@ -193,6 +265,8 @@ server {
         proxy_pass http://localhost:3000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 ```

@@ -9,7 +9,6 @@ import * as I from '../icons.jsx';
 export default function NodePage({ node, onBack, onManage, onReload }) {
   const [status, setStatus]     = useState(null);
   const [users, setUsers]       = useState([]);
-  const [traffic, setTraffic]   = useState({});
   const [loading, setLoading]   = useState(true);
   const [modalEdit, setModalEdit] = useState(false);
 
@@ -19,7 +18,6 @@ export default function NodePage({ node, onBack, onManage, onReload }) {
       const s = await api('GET', `/api/nodes/${node.id}/summary`);
       setStatus({ online: s.online });
       setUsers(s.users || []);
-      setTraffic(s.traffic || {});
     } catch {} finally { setLoading(false); }
   }, [node.id]);
 
@@ -103,14 +101,17 @@ export default function NodePage({ node, onBack, onManage, onReload }) {
               </tr></thead>
               <tbody>
                 {users.map(u => {
-                  const traf = u.running ? traffic[u.name] : (u.traffic_rx_snap ? {rx:u.traffic_rx_snap, tx:u.traffic_tx_snap} : traffic[u.name]);
                   return (
                     <tr key={u.id}>
                       <td><span style={{fontFamily:'var(--mono)',fontWeight:600,fontSize:14}}>{u.name}</span></td>
                       <td><span className="badge badge-purple">{u.port}</span></td>
                       <td>{u.is_online ? <span className="badge badge-green"><span className="dot dot-live"/>онлайн</span> : <span style={{color:'var(--t3)',fontSize:12}}>—</span>}</td>
                       <td><span style={{fontFamily:'var(--mono)',fontWeight:500,fontSize:14,color:u.connections>0?'var(--vi)':'var(--t3)'}}>{u.connections}{u.max_devices?`/${u.max_devices}`:''}</span></td>
-                      <td>{traf ? <span className="traf"><span className="rx">↓{traf.rx}</span><span className="tx"> ↑{traf.tx}</span></span> : <span style={{color:'var(--t3)',fontSize:12}}>—</span>}</td>
+                      <td>
+                        {(u.current_traffic_rx_bytes > 0 || u.current_traffic_tx_bytes > 0)
+                          ? <span className="traf"><span className="rx">↓{u.current_traffic_rx}</span><span className="tx"> ↑{u.current_traffic_tx}</span></span>
+                          : <span style={{color:'var(--t3)',fontSize:12}}>—</span>}
+                      </td>
                       <td><span className={`badge ${u.running?'badge-green':'badge-red'}`}><span className={`dot ${u.running?'dot-live':''}`}/>{u.running?'активен':'остановлен'}</span></td>
                       <td>{expiryBadge(u.expires_at)}</td>
                       <td>
