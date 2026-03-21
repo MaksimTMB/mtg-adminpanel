@@ -452,6 +452,30 @@ tbody tr:hover td { background: rgba(124,111,247,0.04); }
   .mobile-user-grid { grid-template-columns: 1fr; }
   .topbar-right { width: 100%; flex-wrap: wrap; }
   .topbar-right .btn { flex: 1 1 calc(50% - 8px); justify-content: center; }
+  .all-users-node-head {
+    align-items: flex-start !important;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .all-users-node-meta {
+    width: 100%;
+  }
+  .all-users-node-actions {
+    width: 100%;
+    padding-left: 40px;
+    box-sizing: border-box;
+    display: grid;
+    gap: 8px;
+    justify-content: stretch;
+  }
+  .all-users-node-badges {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .all-users-node-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
 }
 
 .mobile-bar {
