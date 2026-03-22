@@ -238,13 +238,8 @@ export default function UsersPage({ node, onBack }) {
             value={search} onChange={e => setSearch(e.target.value)}
             style={{width:160,height:30,padding:'0 10px',fontSize:13}}/>
           <button className="btn btn-ghost btn-sm" onClick={() => loadUsers(true)}><I.RefreshCw/></button>
-          <div className="export-wrap">
-            <button className="btn btn-ghost btn-sm" title={t.exportTitle}><I.Download/> {t.exportTitle}</button>
-            <div className="export-menu">
-              <div className="export-item" onClick={() => exportData('csv')}><I.Download/> CSV</div>
-              <div className="export-item" onClick={() => exportData('json')}><I.Download/> JSON</div>
-            </div>
-          </div>
+          <button className="btn btn-ghost btn-sm" onClick={() => exportData('csv')} title={t.exportTitle}><I.Download/> CSV</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => exportData('json')} title={t.exportTitle}><I.Download/> JSON</button>
           <button className="btn btn-secondary btn-sm" onClick={syncUsers}><I.Sync/> {t.syncBtn}</button>
           <button className="btn btn-primary btn-sm" onClick={() => setModal(true)}><I.Plus/> {t.add}</button>
         </div>
