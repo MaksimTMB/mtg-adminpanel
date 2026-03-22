@@ -2,9 +2,11 @@ import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api.js';
 import { toast } from '../toast.jsx';
 import { flagUrl, expiryBadge, copyText } from '../utils.jsx';
+import { useAppCtx } from '../AppContext.jsx';
 import * as I from '../icons.jsx';
 
 export default function AllUsers({ nodes, onSelectNode }) {
+  const { t } = useAppCtx();
   const [groups, setGroups]         = useState({});
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -12,12 +14,9 @@ export default function AllUsers({ nodes, onSelectNode }) {
   const load = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true); else setLoading(true);
     try {
-      // /users already contains traffic_rx/tx + connections — no extra call needed
       const res = await Promise.all(nodes.map(async n => {
-        try {
-          const users = await api('GET', `/api/nodes/${n.id}/users`);
-          return [n.id, users];
-        } catch { return [n.id, []]; }
+        try { const users = await api('GET', `/api/nodes/${n.id}/users`); return [n.id, users]; }
+        catch { return [n.id, []]; }
       }));
       setGroups(Object.fromEntries(res));
     } finally { setLoading(false); setRefreshing(false); }
@@ -30,30 +29,26 @@ export default function AllUsers({ nodes, onSelectNode }) {
   const totalActive = Object.values(groups).reduce((a, u) => a + u.filter(x => x.running).length, 0);
 
   const copyLink = async (txt) => {
-    try {
-      await copyText(txt);
-      toast('Скопировано!', 'success');
-    } catch {
-      toast('Не удалось скопировать. Зажми ссылку и скопируй вручную.', 'error');
-    }
+    try { await copyText(txt); toast(t.copied, 'success'); }
+    catch { toast(t.copyError, 'error'); }
   };
 
   return (
     <div className="pg">
       <div className="topbar">
         <div className="topbar-left">
-          <div className="page-title">Все <em>клиенты</em></div>
+          <div className="page-title">{t.allTitle} <em>{t.allTitleEm}</em></div>
           <div className="page-desc">
-            {loading ? '...' : `${totalUsers} клиентов · ${totalActive} активных · ${totalOnline} онлайн · ${nodes.length} нод`}
+            {loading ? '...' : t.allUsersStats(totalUsers, totalActive, totalOnline, nodes.length)}
           </div>
         </div>
         <div className="topbar-right">
           {refreshing && <span className="refreshing"><span className="spin"/></span>}
-          <button className="btn btn-ghost btn-sm" onClick={() => load(true)}><I.RefreshCw/> Обновить</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => load(true)}><I.RefreshCw/> {t.refresh}</button>
         </div>
       </div>
 
-      {loading ? <div className="loading-center"><span className="spin"/> Загружаю...</div> : (
+      {loading ? <div className="loading-center"><span className="spin"/> {t.loading}</div> : (
         <div style={{display:'flex',flexDirection:'column',gap:16}}>
           {nodes.map(node => {
             const users  = groups[node.id] || [];
@@ -61,7 +56,6 @@ export default function AllUsers({ nodes, onSelectNode }) {
             const online = users.filter(u => u.is_online).length;
             return (
               <div className="card" key={node.id}>
-                {/* Node header */}
                 <div className="all-users-node-head" style={{marginBottom: users.length ? 16 : 0}}>
                   <div className="all-users-node-meta">
                     {node.flag
@@ -72,7 +66,7 @@ export default function AllUsers({ nodes, onSelectNode }) {
                       <div style={{fontSize:11,color:'var(--t3)',fontFamily:'var(--mono)'}}>{node.host}</div>
                       {users.length > 0 && (
                         <div className="all-users-node-badges">
-                          {online > 0 && <span className="badge badge-green"><span className="dot dot-live"/>{online} онлайн</span>}
+                          {online > 0 && <span className="badge badge-green"><span className="dot dot-live"/>{online} {t.online}</span>}
                           <span className="badge badge-purple">{active} / {users.length}</span>
                         </div>
                       )}
@@ -80,7 +74,7 @@ export default function AllUsers({ nodes, onSelectNode }) {
                   </div>
                   <div className="all-users-node-actions">
                     <button className="btn btn-primary btn-sm" onClick={() => onSelectNode(node)}>
-                      <I.Users/> Управление
+                      <I.Users/> {t.manage}
                     </button>
                   </div>
                 </div>
@@ -89,14 +83,14 @@ export default function AllUsers({ nodes, onSelectNode }) {
                   <div className="table-wrap">
                     <table>
                       <thead><tr>
-                        <th>Клиент</th>
-                        <th>Порт</th>
-                        <th>Подключения</th>
-                        <th>Трафик</th>
-                        <th>Всего</th>
-                        <th>Статус</th>
-                        <th>Срок</th>
-                        <th>Заметка</th>
+                        <th>{t.colClient}</th>
+                        <th>{t.colPort}</th>
+                        <th>{t.colConnections}</th>
+                        <th>{t.colTraffic}</th>
+                        <th>{t.colTotal}</th>
+                        <th>{t.colStatus}</th>
+                        <th>{t.colExpiry}</th>
+                        <th>{t.colNote}</th>
                         <th></th>
                       </tr></thead>
                       <tbody>
@@ -106,21 +100,21 @@ export default function AllUsers({ nodes, onSelectNode }) {
                             <td><span className="badge badge-purple">{u.port}</span></td>
                             <td>
                               {u.is_online
-                                ? <span className="badge badge-green"><span className="dot dot-live"/>{u.connections} онлайн</span>
-                                : <span style={{color:'var(--t3)',fontSize:12}}>офлайн</span>}
+                                ? <span className="badge badge-green"><span className="dot dot-live"/>{u.connections} {t.online}</span>
+                                : <span style={{color:'var(--t3)',fontSize:12}}>{t.offline}</span>}
                             </td>
                             <td>
                               {(u.current_traffic_rx_bytes > 0 || u.current_traffic_tx_bytes > 0)
                                 ? <span className="traf">
                                     <span className="rx">↓{u.current_traffic_rx}</span>
                                     <span className="tx"> ↑{u.current_traffic_tx}</span>
-                                    {!u.running && <span style={{fontSize:10,color:'var(--t3)',marginLeft:3}} title="Сохранено между остановками">⏸</span>}
+                                    {!u.running && <span style={{fontSize:10,color:'var(--t3)',marginLeft:3}}>⏸</span>}
                                   </span>
                                 : <span style={{color:'var(--t3)',fontSize:11}}>—</span>}
                             </td>
                             <td>
                               {(u.lifetime_traffic_rx_bytes > 0 || u.lifetime_traffic_tx_bytes > 0)
-                                ? <span className="traf" title="Накопленный трафик за все периоды">
+                                ? <span className="traf">
                                     <span className="rx">↓{u.lifetime_traffic_rx}</span>
                                     <span className="tx"> ↑{u.lifetime_traffic_tx}</span>
                                   </span>
@@ -129,7 +123,7 @@ export default function AllUsers({ nodes, onSelectNode }) {
                             <td>
                               <span className={`badge ${u.running ? 'badge-green' : 'badge-red'}`}>
                                 <span className={`dot ${u.running ? 'dot-live' : ''}`}/>
-                                {u.running ? 'активен' : 'стоп'}
+                                {u.running ? t.running : t.stop}
                               </span>
                             </td>
                             <td>{expiryBadge(u.expires_at, true)}</td>
@@ -138,7 +132,7 @@ export default function AllUsers({ nodes, onSelectNode }) {
                             </td>
                             <td>
                               <div className="acts">
-                                <button className="btn btn-icon btn-secondary btn-sm" onClick={() => copyLink(u.link)} title="Копировать ссылку"><I.Copy/></button>
+                                <button className="btn btn-icon btn-secondary btn-sm" onClick={() => copyLink(u.link)} title={t.copyLinkTitle}><I.Copy/></button>
                               </div>
                             </td>
                           </tr>
@@ -150,14 +144,14 @@ export default function AllUsers({ nodes, onSelectNode }) {
 
                 {users.length === 0 && (
                   <div style={{color:'var(--t3)',fontSize:12,textAlign:'center',padding:'12px 0'}}>
-                    Нет клиентов на этой ноде
+                    {t.noClientsOnNode}
                   </div>
                 )}
               </div>
             );
           })}
           {!nodes.length && (
-            <div className="empty"><div className="empty-icon"><I.Users/></div><div className="empty-title">Нет нод</div></div>
+            <div className="empty"><div className="empty-icon"><I.Users/></div><div className="empty-title">{t.noNodesTitle}</div></div>
           )}
         </div>
       )}

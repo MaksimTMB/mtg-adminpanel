@@ -1,15 +1,18 @@
 import { QRCodeSVG } from 'qrcode.react';
 import { toast } from '../toast.jsx';
 import { copyText } from '../utils.jsx';
+import { useAppCtx } from '../AppContext.jsx';
 import * as I from '../icons.jsx';
 
 export default function QRModal({ user, onClose }) {
+  const { t } = useAppCtx();
+
   const copy = async () => {
     try {
       await copyText(user.link);
-      toast('Скопировано!', 'success');
+      toast(t.copied, 'success');
     } catch {
-      toast('Не удалось скопировать. Зажми ссылку и скопируй вручную.', 'error');
+      toast(t.copyError, 'error');
     }
   };
 
@@ -27,10 +30,10 @@ export default function QRModal({ user, onClose }) {
           <button type="button" className="link-box" style={{maxWidth:'100%',justifyContent:'center',width:'100%'}} onClick={copy}>
             <I.Copy/><span className="link-txt">{user.link}</span>
           </button>
-          <p style={{fontSize:11,color:'var(--t3)',marginTop:8}}>Нажми на ссылку чтобы скопировать</p>
+          <p style={{fontSize:11,color:'var(--t3)',marginTop:8}}>{t.copyLink}</p>
         </div>
         <div className="modal-foot">
-          <button className="btn btn-ghost" onClick={onClose} style={{width:'100%',justifyContent:'center'}}>Закрыть</button>
+          <button className="btn btn-ghost" onClick={onClose} style={{width:'100%',justifyContent:'center'}}>{t.close}</button>
         </div>
       </div>
     </div>

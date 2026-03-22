@@ -29,6 +29,40 @@
   --tx: 0.2s var(--ease);
 }
 
+/* ── Light theme ─────────────────────────────────────────── */
+[data-theme="light"] {
+  --bg:    #f0f2f8;
+  --bg2:   #ffffff;
+  --bg3:   #e8eaf2;
+  --card:  #ffffff;
+  --card2: #f4f6fc;
+  --b1:    rgba(0,0,0,0.07);
+  --b2:    rgba(0,0,0,0.12);
+  --b3:    rgba(0,0,0,0.20);
+  --t1:    #1a1d2e;
+  --t2:    #50566e;
+  --t3:    #9298ae;
+  --glow:  0 0 40px rgba(124,111,247,0.12);
+}
+[data-theme="light"] body { color: var(--t1); }
+[data-theme="light"] ::-webkit-scrollbar-thumb { background: var(--b2); }
+[data-theme="light"] .login-wrap { background: var(--bg); }
+[data-theme="light"] .login-card { background: var(--card); box-shadow: 0 8px 40px rgba(0,0,0,0.10); }
+[data-theme="light"] .form-input { background: var(--bg3); border-color: var(--b2); color: var(--t1); }
+[data-theme="light"] .form-input:focus { border-color: var(--vi); background: var(--bg2); }
+[data-theme="light"] .btn-ghost { color: var(--t2); }
+[data-theme="light"] .btn-ghost:hover { background: var(--bg3); color: var(--t1); }
+[data-theme="light"] .nav-item:hover { background: var(--bg3); }
+[data-theme="light"] .nav-item.active { background: linear-gradient(135deg, rgba(124,111,247,0.12) 0%, rgba(56,189,248,0.05) 100%); }
+[data-theme="light"] .overlay { background: rgba(0,0,0,0.35); }
+[data-theme="light"] .modal { background: var(--card); box-shadow: 0 16px 60px rgba(0,0,0,0.18); }
+[data-theme="light"] .version-sidebar-btn { background: var(--bg3); }
+[data-theme="light"] .radio-btn { background: var(--bg3); border-color: var(--b2); }
+[data-theme="light"] .radio-btn.on { background: rgba(124,111,247,0.12); border-color: var(--vi); color: var(--vi); }
+[data-theme="light"] table thead tr { background: var(--bg3); }
+[data-theme="light"] table tbody tr:hover { background: var(--bg3); }
+[data-theme="light"] .mobile-user-card { background: var(--card); }
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { font-size: 16px; }
 body {
@@ -65,6 +99,7 @@ body {
   box-shadow: 0 0 20px rgba(124,111,247,0.4);
 }
 .logo-icon svg { width: 18px; height: 18px; color: #fff; }
+.logo-img { width: 34px; height: 34px; object-fit: contain; border-radius: 10px; flex-shrink: 0; }
 .logo-name {
   font-size: 14px; font-weight: 600; letter-spacing: -0.2px;
   background: var(--grad); -webkit-background-clip: text; -webkit-text-fill-color: transparent;

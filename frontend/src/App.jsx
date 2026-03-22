@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api, getToken, setToken, setTotpCode, setTotpSession, clearTotpAuth, setTotpRequiredHandler } from './api.js';
 import { useToast, Toasts } from './toast.jsx';
+import { useAppCtx } from './AppContext.jsx';
 import Login from './components/Login.jsx';
 import Dashboard from './components/Dashboard.jsx';
 import NodesPage from './components/NodesPage.jsx';
@@ -13,6 +14,7 @@ import * as I from './icons.jsx';
 
 // ── Inline TOTP re-auth overlay ──────────────────────────
 function TotpOverlay({ onDone }) {
+  const { t } = useAppCtx();
   const [code, setCode] = useState('');
   const [err,  setErr]  = useState(false);
 
@@ -22,10 +24,7 @@ function TotpOverlay({ onDone }) {
     try {
       const r = await fetch('/api/totp/session', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-auth-token': getToken(),
-        },
+        headers: { 'Content-Type': 'application/json', 'x-auth-token': getToken() },
         body: JSON.stringify({ code }),
       });
       const data = await r.json().catch(() => ({}));
@@ -49,24 +48,24 @@ function TotpOverlay({ onDone }) {
       <div className="login-card" style={{margin:0}}>
         <div className="login-head">
           <div className="login-icon"><I.Shield/></div>
-          <div className="login-title">Требуется 2FA</div>
-          <div className="login-sub">Сессия требует подтверждения</div>
+          <div className="login-title">{t.totpRequired}</div>
+          <div className="login-sub">{t.totpSessionExp}</div>
         </div>
         <div className="login-body">
           <form onSubmit={submit}>
             <p style={{fontSize:13,color:'var(--t2)',textAlign:'center',marginBottom:18,lineHeight:1.6}}>
-              Введи текущий код из приложения<br/>аутентификатора
+              {t.totpEnterCode.split('\n').map((l,i) => <span key={i}>{l}{i===0&&<br/>}</span>)}
             </p>
             <div className="form-group">
               <input className="form-input totp-code-input" type="text" inputMode="numeric"
                 placeholder="——————" value={code} maxLength={6}
                 onChange={e => { setCode(e.target.value.replace(/\D/g,'')); setErr(false); }}
                 autoFocus/>
-              {err && <div style={{color:'var(--re)',fontSize:12,marginTop:6}}>Неверный код</div>}
+              {err && <div style={{color:'var(--re)',fontSize:12,marginTop:6}}>{t.wrongCode}</div>}
             </div>
             <button className="btn btn-primary" style={{width:'100%',justifyContent:'center',padding:10}}
               type="submit" disabled={code.length !== 6}>
-              <I.Check/> Подтвердить
+              <I.Check/> {t.confirm}
             </button>
           </form>
         </div>
@@ -76,6 +75,7 @@ function TotpOverlay({ onDone }) {
 }
 
 export default function App() {
+  const { t, logo } = useAppCtx();
   const [authed, setAuthed]           = useState(!!getToken());
   const [page, setPage]               = useState('dashboard');
   const [nodes, setNodes]             = useState([]);
@@ -85,7 +85,6 @@ export default function App() {
   const [totpNeeded, setTotpNeeded]   = useState(false);
   const toasts = useToast();
 
-  // Register global TOTP-required handler
   useEffect(() => {
     setTotpRequiredHandler(() => setTotpNeeded(true));
     return () => setTotpRequiredHandler(null);
@@ -116,15 +115,15 @@ export default function App() {
   const openNodeView = (n) => { setSelNodeView(n); setPage('node'); };
 
   const NAV = [
-    { id: 'dashboard', icon: <I.LayoutDash/>, label: 'Дашборд' },
-    { id: 'nodes',     icon: <I.Server/>,     label: 'Ноды' },
-    { id: 'users',     icon: <I.Users/>,      label: 'Клиенты' },
-    { id: 'settings',  icon: <I.Settings/>,   label: 'Настройки' },
+    { id: 'dashboard', icon: <I.LayoutDash/>, label: t.dashboard },
+    { id: 'nodes',     icon: <I.Server/>,     label: t.nodes },
+    { id: 'users',     icon: <I.Users/>,      label: t.clients },
+    { id: 'settings',  icon: <I.Settings/>,   label: t.settings },
   ];
 
   if (!authed) return (
     <>
-      <Login onLogin={t => { setToken(t); setAuthed(true); }}/>
+      <Login onLogin={tok => { setToken(tok); setAuthed(true); }}/>
       <Toasts list={toasts}/>
     </>
   );
@@ -137,7 +136,10 @@ export default function App() {
 
       <aside className="sidebar" id="sidebar">
         <div className="sidebar-logo">
-          <div className="logo-icon"><I.Zap/></div>
+          {logo
+            ? <img src={logo} alt="logo" className="logo-img"/>
+            : <div className="logo-icon"><I.Zap/></div>
+          }
           <div className="logo-texts">
             <div className="logo-name">MTG Panel</div>
             <div className="logo-sub">{panelVersion || 'adminpanel'}</div>
@@ -145,7 +147,7 @@ export default function App() {
         </div>
 
         <nav className="nav">
-          <div className="nav-section">Навигация</div>
+          <div className="nav-section">{t.navigation}</div>
           {NAV.map(item => (
             <div
               key={item.id}
@@ -161,7 +163,7 @@ export default function App() {
         <div className="sidebar-footer">
           <button className="btn btn-ghost btn-sm" style={{width:'100%',justifyContent:'center',marginTop:8}}
             onClick={() => { setToken(''); clearTotpAuth(); setAuthed(false); }}>
-            <I.LogOut/> Выйти
+            <I.LogOut/> {t.logout}
           </button>
         </div>
       </aside>
@@ -182,17 +184,14 @@ export default function App() {
         {page === 'settings' && <Settings/>}
       </main>
 
-      <nav className="mobile-bar" aria-label="Мобильная навигация">
+      <nav className="mobile-bar" aria-label={t.navigation}>
         {NAV.map(item => {
           const isActive =
             page === item.id ||
             (page === 'node' && item.id === 'nodes') ||
             (page === 'users' && selNode && item.id === 'nodes');
-
           return (
-            <button
-              key={item.id}
-              type="button"
+            <button key={item.id} type="button"
               className={`mob-item ${isActive ? 'active' : ''}`}
               onClick={() => nav(item.id)}
               aria-current={isActive ? 'page' : undefined}>
@@ -200,11 +199,9 @@ export default function App() {
             </button>
           );
         })}
-        <button
-          type="button"
-          className="mob-item mob-logout"
+        <button type="button" className="mob-item mob-logout"
           onClick={() => { setToken(''); setTotpCode(''); setAuthed(false); }}>
-          <I.LogOut/><span className="mob-label">Выйти</span>
+          <I.LogOut/><span className="mob-label">{t.logout}</span>
         </button>
       </nav>
 

@@ -1,20 +1,22 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api.js';
 import { toast } from '../toast.jsx';
+import { useAppCtx } from '../AppContext.jsx';
 import * as I from '../icons.jsx';
 
-function parseVer(raw) {
+function parseVer(raw, dateLocale) {
   if (!raw || raw === 'error' || raw === 'unknown') return { name: raw || '—', date: null };
   const m = raw.match(/^([\w:.]+)\s*\|\s*built\s+([\d-T:.Z]+)/);
   if (m) {
     const d = new Date(m[2]);
-    const date = isNaN(d) ? null : d.toLocaleDateString('ru-RU', {day:'2-digit',month:'short',year:'numeric'});
+    const date = isNaN(d) ? null : d.toLocaleDateString(dateLocale, {day:'2-digit',month:'short',year:'numeric'});
     return { name: m[1], date };
   }
   return { name: raw.slice(0, 20), date: null };
 }
 
 export default function VersionBlock({ nodes, panelVersion }) {
+  const { t } = useAppCtx();
   const [versions, setVersions]             = useState({});
   const [agentVersions, setAgentVersions]   = useState({});
   const [updating, setUpdating]             = useState({});
@@ -64,7 +66,7 @@ export default function VersionBlock({ nodes, panelVersion }) {
     setUpdating(u => ({...u, [node.id]: true}));
     try {
       await api('POST', `/api/nodes/${node.id}/mtg-update`);
-      toast(`${node.name}: MTG обновлён`, 'success');
+      toast(`${node.name}: MTG updated`, 'success');
       setTimeout(checkVersions, 3000);
     } catch(e) { toast(e.message, 'error'); }
     finally { setUpdating(u => ({...u, [node.id]: false})); }
@@ -76,16 +78,16 @@ export default function VersionBlock({ nodes, panelVersion }) {
 
   if (!nodes.length) return null;
 
-  const vList      = Object.values(versions).map(parseVer);
+  const vList      = Object.values(versions).map(v => parseVer(v, t.dateLocale));
   const names      = [...new Set(vList.map(v => v.name).filter(v => v && v !== 'error' && v !== '—'))];
-  const sidebarTag = checking ? null : names.length === 1 ? names[0] : names.length > 1 ? 'разные' : null;
+  const sidebarTag = checking ? null : names.length === 1 ? names[0] : names.length > 1 ? t.versionsDiff : null;
   const anyError   = Object.values(versions).some(v => v === 'error');
 
   return (
     <>
       <button className="version-sidebar-btn" onClick={() => setOpen(true)}>
         <I.Activity/>
-        Версии
+        {t.versionsBtn}
         {checking
           ? <span className="version-sidebar-tag load"><span className="spin spin-sm" style={{width:8,height:8}}/></span>
           : sidebarTag
@@ -98,7 +100,7 @@ export default function VersionBlock({ nodes, panelVersion }) {
         <div className="overlay" onClick={e => e.target === e.currentTarget && setOpen(false)}>
           <div className="modal" style={{maxWidth:700}}>
             <div className="modal-head">
-              <div className="modal-title"><I.Activity/> Версии и обновления</div>
+              <div className="modal-title"><I.Activity/> {t.versionsTitle}</div>
               <button className="modal-close" onClick={() => setOpen(false)}><I.X/></button>
             </div>
 
@@ -112,13 +114,13 @@ export default function VersionBlock({ nodes, panelVersion }) {
                     <div>
                       <div style={{fontWeight:600,fontSize:13}}>MTG AdminPanel</div>
                       <div style={{fontSize:11,color:'var(--t3)',fontFamily:'var(--mono)',marginTop:3,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-                        <span>Установлена: <span style={{color:'var(--vi)'}}>{panelVersion || '...'}</span></span>
+                        <span>{t.versionPanel}: <span style={{color:'var(--vi)'}}>{panelVersion || '...'}</span></span>
                         {checkingRelease
-                          ? <span style={{color:'var(--t3)',display:'inline-flex',alignItems:'center',gap:4}}><span className="spin spin-sm" style={{width:9,height:9}}/> проверяю...</span>
+                          ? <span style={{color:'var(--t3)',display:'inline-flex',alignItems:'center',gap:4}}><span className="spin spin-sm" style={{width:9,height:9}}/> {t.versionChecking}</span>
                           : latestRelease && panelVersion
                             ? latestRelease.tag !== panelVersion
-                              ? <span className="badge badge-amber" style={{fontSize:10}}>↑ новая {latestRelease.tag}</span>
-                              : <span className="badge badge-green" style={{fontSize:10}}>актуальная</span>
+                              ? <span className="badge badge-amber" style={{fontSize:10}}>↑ {latestRelease.tag}</span>
+                              : <span className="badge badge-green" style={{fontSize:10}}>✓</span>
                             : null
                         }
                       </div>
@@ -132,14 +134,14 @@ export default function VersionBlock({ nodes, panelVersion }) {
                     )}
                     <a href="https://github.com/MaksimTMB/mtg-adminpanel/releases" target="_blank"
                       className="btn btn-ghost btn-sm" style={{textDecoration:'none'}}>
-                      Релизы
+                      Releases
                     </a>
                   </div>
                 </div>
               </div>
 
               <div style={{fontSize:11,fontWeight:600,color:'var(--t3)',textTransform:'uppercase',letterSpacing:'1px',marginBottom:8}}>
-                MTG прокси на нодах
+                MTG proxy on nodes
               </div>
               <table className="ver-table" style={{tableLayout:'fixed',width:'100%'}}>
                 <colgroup>
@@ -152,18 +154,18 @@ export default function VersionBlock({ nodes, panelVersion }) {
                 </colgroup>
                 <thead>
                   <tr>
-                    <th>Нода</th>
+                    <th>{t.colNode}</th>
                     <th>Host</th>
-                    <th>MTG образ</th>
-                    <th>Собран</th>
-                    <th>Агент</th>
-                    <th style={{textAlign:'right'}}>Обновить</th>
+                    <th>{t.colImage}</th>
+                    <th>{t.colBuilt}</th>
+                    <th>{t.colAgent}</th>
+                    <th style={{textAlign:'right'}}>{t.colUpdate}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {nodes.map(n => {
                     const raw    = versions[n.id];
-                    const parsed = raw ? parseVer(raw) : null;
+                    const parsed = raw ? parseVer(raw, t.dateLocale) : null;
                     const agentV = agentVersions[n.id];
                     const upd    = updating[n.id];
                     return (
@@ -176,7 +178,7 @@ export default function VersionBlock({ nodes, panelVersion }) {
                             : !raw
                               ? <span style={{color:'var(--t3)',fontSize:11}}>—</span>
                               : raw === 'error'
-                                ? <span className="badge badge-red">ошибка</span>
+                                ? <span className="badge badge-red">{t.versionError}</span>
                                 : <span className="badge badge-blue" style={{fontFamily:'var(--mono)'}}>{parsed.name}</span>
                           }
                         </td>
@@ -187,15 +189,15 @@ export default function VersionBlock({ nodes, panelVersion }) {
                             : agentV
                               ? <span className="badge badge-green" style={{fontFamily:'var(--mono)',fontSize:10}}>v{agentV}</span>
                               : n.agent_port
-                                ? <span className="badge badge-red" style={{fontSize:10}}>офлайн</span>
+                                ? <span className="badge badge-red" style={{fontSize:10}}>{t.offline}</span>
                                 : <span style={{color:'var(--t3)',fontSize:11}}>—</span>
                           }
                         </td>
                         <td style={{textAlign:'right'}}>
                           <button className="btn btn-ghost btn-sm" onClick={() => updateNode(n)}
                             disabled={upd || !raw || raw === 'error'}
-                            title="docker pull — скачать последний патч">
-                            {upd ? <><span className="spin spin-sm"/> ...</> : <><I.Download/> pull</>}
+                            title="docker pull">
+                            {upd ? <><span className="spin spin-sm"/> {t.updating}</> : <><I.Download/> {t.updatePull}</>}
                           </button>
                         </td>
                       </tr>
@@ -207,13 +209,13 @@ export default function VersionBlock({ nodes, panelVersion }) {
 
             <div className="modal-foot">
               <button className="btn btn-ghost" onClick={checkVersions} disabled={checking}>
-                {checking ? <><span className="spin spin-sm"/> Проверяю...</> : <><I.RefreshCw/> Проверить версии</>}
+                {checking ? <><span className="spin spin-sm"/> {t.versionChecking}</> : <><I.RefreshCw/> {t.checkVersions}</>}
               </button>
               <button className="btn btn-secondary" onClick={updateAllNodes}
                 disabled={Object.values(updating).some(Boolean)}>
-                <I.Download/> Обновить все ноды
+                <I.Download/> {t.updateAllNodes}
               </button>
-              <button className="btn btn-primary" onClick={() => setOpen(false)}>Закрыть</button>
+              <button className="btn btn-primary" onClick={() => setOpen(false)}>{t.close}</button>
             </div>
           </div>
         </div>

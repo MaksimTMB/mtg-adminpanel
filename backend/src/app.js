@@ -59,6 +59,22 @@ app.get('/api/version', (req, res) => {
   res.json({ version: pkgVersion });
 });
 
+const fs = require('fs');
+const LOGO_PATH = process.env.DATA_DIR ? path.join(process.env.DATA_DIR, 'logo.json') : path.join(__dirname, '../../data/logo.json');
+
+app.get('/logo', (req, res) => {
+  try {
+    if (!fs.existsSync(LOGO_PATH)) return res.status(404).end();
+    const { data } = JSON.parse(fs.readFileSync(LOGO_PATH, 'utf8'));
+    const m = data.match(/^data:([^;]+);base64,(.+)$/);
+    if (!m) return res.status(400).end();
+    const buf = Buffer.from(m[2], 'base64');
+    res.setHeader('Content-Type', m[1]);
+    res.setHeader('Cache-Control', 'no-cache');
+    res.send(buf);
+  } catch { res.status(500).end(); }
+});
+
 // ── TOTP Session store (SQLite-backed, 24h TTL) ───────────
 db.prepare(`CREATE TABLE IF NOT EXISTS totp_sessions (
   token TEXT PRIMARY KEY,
@@ -165,6 +181,25 @@ app.post('/api/totp/disable', (req, res) => {
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('totp_enabled', '0')").run();
   _invalidateTotpCache();
   res.json({ ok: true });
+});
+
+// ── Logo ──────────────────────────────────────────────────
+app.post('/api/settings/logo', (req, res) => {
+  try {
+    const { data } = req.body;
+    if (!data || !data.startsWith('data:image/')) return res.status(400).json({ error: 'Invalid image data' });
+    const dir = path.dirname(LOGO_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(LOGO_PATH, JSON.stringify({ data }));
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/settings/logo', (req, res) => {
+  try {
+    if (fs.existsSync(LOGO_PATH)) fs.unlinkSync(LOGO_PATH);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── Nodes ─────────────────────────────────────────────────
