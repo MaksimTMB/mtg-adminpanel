@@ -9,6 +9,26 @@ import QRModal from './QRModal.jsx';
 import ConfirmModal from './ConfirmModal.jsx';
 import * as I from '../icons.jsx';
 
+function Sparkline({ data, color = 'var(--cy)', width = 72, height = 24 }) {
+  if (!data || data.length < 2) return null;
+  const max = Math.max(...data, 1);
+  const pts = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * width;
+    const y = height - (v / max) * (height - 2) - 1;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const last = data[data.length - 1];
+  const lx = width;
+  const ly = height - (last / max) * (height - 2) - 1;
+  return (
+    <svg width={width} height={height} style={{display:'block',overflow:'visible'}}>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5"
+        strokeLinecap="round" strokeLinejoin="round" opacity="0.7"/>
+      {last > 0 && <circle cx={lx} cy={ly} r="2.5" fill={color}/>}
+    </svg>
+  );
+}
+
 export default function UsersPage({ node, onBack }) {
   const { t } = useAppCtx();
   const [users, setUsers]     = useState([]);
@@ -19,12 +39,27 @@ export default function UsersPage({ node, onBack }) {
   const [editU, setEditU]     = useState(null);
   const [qrU, setQrU]         = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
+  const [history, setHistory] = useState({});
+
+  const loadHistory = useCallback(async (userList) => {
+    if (!userList.length) return;
+    await Promise.allSettled(userList.map(async u => {
+      try {
+        const rows = await api('GET', `/api/nodes/${node.id}/users/${u.name}/history`);
+        setHistory(h => ({...h, [u.name]: rows.map(r => r.connections)}));
+      } catch {}
+    }));
+  }, [node.id]);
 
   const loadUsers = useCallback(async (silent = false) => {
     if (!silent) setLoading(true); else setRef(true);
-    try { const u = await api('GET', `/api/nodes/${node.id}/users`); setUsers(u); }
+    try {
+      const u = await api('GET', `/api/nodes/${node.id}/users`);
+      setUsers(u);
+      loadHistory(u);
+    }
     finally { setLoading(false); setRef(false); }
-  }, [node.id]);
+  }, [node.id, loadHistory]);
 
   const syncUsers = async () => {
     try {
@@ -148,6 +183,7 @@ export default function UsersPage({ node, onBack }) {
                 {users.map(u => {
                   const devLimit = u.max_devices;
                   const devOver  = devLimit && u.connections > devLimit;
+                  const hist     = history[u.name];
                   return (
                     <tr key={u.id}>
                       <td><span style={{fontFamily:'var(--mono)',fontWeight:600,fontSize:14}}>{u.name}</span></td>
@@ -159,13 +195,18 @@ export default function UsersPage({ node, onBack }) {
                         </span>
                       </td>
                       <td>
-                        {u.is_online
-                          ? <span className={`badge ${devOver ? 'badge-red' : 'badge-green'}`}
-                              title={devLimit ? `${t.maxDevicesLabel}: ${devLimit}` : ''}>
-                              <span className="dot dot-live"/>
-                              {u.connections} {t.online}{devLimit ? ` / ${devLimit}` : ''}
-                            </span>
-                          : <span style={{color:'var(--t3)',fontSize:12}}>{t.offline}</span>}
+                        <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                          {u.is_online
+                            ? <span className={`badge ${devOver ? 'badge-red' : 'badge-green'}`}
+                                title={devLimit ? `${t.maxDevicesLabel}: ${devLimit}` : ''}>
+                                <span className="dot dot-live"/>
+                                {u.connections} {t.online}{devLimit ? ` / ${devLimit}` : ''}
+                              </span>
+                            : <span style={{color:'var(--t3)',fontSize:12}}>{t.offline}</span>}
+                          {hist && hist.length > 1 && (
+                            <Sparkline data={hist} color={u.is_online ? 'var(--gr)' : 'var(--t3)'}/>
+                          )}
+                        </div>
                       </td>
                       <td>
                         {(u.current_traffic_rx_bytes > 0 || u.current_traffic_tx_bytes > 0)
@@ -223,6 +264,7 @@ export default function UsersPage({ node, onBack }) {
           {users.map(u => {
             const devLimit = u.max_devices;
             const devOver  = devLimit && u.connections > devLimit;
+            const hist     = history[u.name];
             return (
               <div className="mobile-user-card card" key={`mobile-${u.id}`}>
                 <div className="mobile-user-head">
@@ -242,12 +284,17 @@ export default function UsersPage({ node, onBack }) {
                 <div className="mobile-user-grid">
                   <div className="mobile-metric">
                     <span className="mobile-metric-label">{t.mobileConnections}</span>
-                    {u.is_online
-                      ? <span className={`badge ${devOver ? 'badge-red' : 'badge-green'}`}>
-                          <span className="dot dot-live"/>
-                          {u.connections}{devLimit ? ` / ${devLimit}` : ''} {t.online}
-                        </span>
-                      : <span className="mobile-muted">{t.offline}</span>}
+                    <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                      {u.is_online
+                        ? <span className={`badge ${devOver ? 'badge-red' : 'badge-green'}`}>
+                            <span className="dot dot-live"/>
+                            {u.connections}{devLimit ? ` / ${devLimit}` : ''} {t.online}
+                          </span>
+                        : <span className="mobile-muted">{t.offline}</span>}
+                      {hist && hist.length > 1 && (
+                        <Sparkline data={hist} color={u.is_online ? 'var(--gr)' : 'var(--t3)'} width={80} height={22}/>
+                      )}
+                    </div>
                   </div>
                   <div className="mobile-metric">
                     <span className="mobile-metric-label">{t.mobilePeriodTraffic}</span>
