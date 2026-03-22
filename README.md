@@ -46,7 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/MaksimTMB/mtg-adminpanel/main/updat
 
 Или вручную:
 ```bash
-cd /opt/mtg-adminpanel && git pull && docker compose up -d --build
+cd /opt/mtg-adminpanel && git pull && docker compose build --no-cache && docker compose up -d
 ```
 
 ---
