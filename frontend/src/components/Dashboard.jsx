@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { api } from '../api.js';
 import { flagUrl } from '../utils.jsx';
+import { useAppCtx } from '../AppContext.jsx';
 import StatPill from './StatPill.jsx';
 import * as I from '../icons.jsx';
 
 export default function Dashboard({ nodes, onSelectNode, onManageNode }) {
+  const { t } = useAppCtx();
   const [status, setStatus]       = useState([]);
   const [loading, setLoading]     = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -17,8 +19,8 @@ export default function Dashboard({ nodes, onSelectNode, onManageNode }) {
 
   useEffect(() => {
     load();
-    const t = setInterval(() => load(true), 15000);
-    return () => clearInterval(t);
+    const ti = setInterval(() => load(true), 15000);
+    return () => clearInterval(ti);
   }, [load]);
 
   const totalUsers    = useMemo(() => nodes.reduce((a, n) => a + (n._userCount || 0), 0), [nodes]);
@@ -31,38 +33,38 @@ export default function Dashboard({ nodes, onSelectNode, onManageNode }) {
     <div className="pg">
       <div className="topbar">
         <div className="topbar-left">
-          <div className="page-title">Панель <em>управления</em></div>
-          <div className="page-desc">MTG Proxy AdminPanel</div>
+          <div className="page-title">{t.dashTitle} <em>{t.dashTitleEm}</em></div>
+          <div className="page-desc">{t.dashDesc}</div>
         </div>
         <div className="topbar-right">
           {refreshing && <span className="refreshing"><span className="spin"/></span>}
-          <button className="btn btn-ghost btn-sm" onClick={() => load()}><I.RefreshCw/> Обновить</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => load()}><I.RefreshCw/> {t.refresh}</button>
         </div>
       </div>
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:24}}>
         <div className="card" style={{padding:'20px 24px'}}>
-          <div style={{fontSize:12,fontWeight:600,color:'var(--t3)',textTransform:'uppercase',letterSpacing:'1px',marginBottom:10}}>Ноды</div>
+          <div style={{fontSize:12,fontWeight:600,color:'var(--t3)',textTransform:'uppercase',letterSpacing:'1px',marginBottom:10}}>{t.nodesLabel}</div>
           <div style={{fontSize:42,fontWeight:800,letterSpacing:'-1.5px',color:'var(--t1)',lineHeight:1,marginBottom:14}}>{nodes.length}</div>
           <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-            <StatPill count={onlineNodes} label="онлайн" color="34,197,94" dot="dot-live"/>
-            {nodes.length - onlineNodes > 0 && <StatPill count={nodes.length - onlineNodes} label="офлайн" color="251,113,133" dot=""/>}
+            <StatPill count={onlineNodes} label={t.online} color="34,197,94" dot="dot-live"/>
+            {nodes.length - onlineNodes > 0 && <StatPill count={nodes.length - onlineNodes} label={t.offline} color="251,113,133" dot=""/>}
           </div>
         </div>
         <div className="card" style={{padding:'20px 24px'}}>
-          <div style={{fontSize:12,fontWeight:600,color:'var(--t3)',textTransform:'uppercase',letterSpacing:'1px',marginBottom:10}}>Клиенты</div>
+          <div style={{fontSize:12,fontWeight:600,color:'var(--t3)',textTransform:'uppercase',letterSpacing:'1px',marginBottom:10}}>{t.clientsLabel}</div>
           <div style={{fontSize:42,fontWeight:800,letterSpacing:'-1.5px',color:'var(--t1)',lineHeight:1,marginBottom:14}}>{totalUsers}</div>
           <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-            <StatPill count={activeProxies}  label="активных"   color="34,197,94"  dot="dot-live"/>
-            {totalOnline > 0    && <StatPill count={totalOnline}    label="онлайн"      color="56,189,248" dot="dot-live"/>}
-            {stoppedProxies > 0 && <StatPill count={stoppedProxies} label="остановлен"  color="251,113,133" dot=""/>}
+            <StatPill count={activeProxies}  label={t.active}   color="34,197,94"  dot="dot-live"/>
+            {totalOnline > 0    && <StatPill count={totalOnline}    label={t.online}      color="56,189,248" dot="dot-live"/>}
+            {stoppedProxies > 0 && <StatPill count={stoppedProxies} label={t.stopped}  color="251,113,133" dot=""/>}
           </div>
         </div>
       </div>
 
-      <div className="sec-lbl">Ноды</div>
+      <div className="sec-lbl">{t.nodesLabel}</div>
       {loading
-        ? <div className="loading-center"><span className="spin"/> Загружаю...</div>
+        ? <div className="loading-center"><span className="spin"/> {t.loading}</div>
         : (
           <div className="grid-2">
             {nodes.map(node => {
@@ -83,23 +85,23 @@ export default function Dashboard({ nodes, onSelectNode, onManageNode }) {
                       <div style={{fontSize:12,color:'var(--t3)',fontFamily:'var(--mono)'}}>{node.host}</div>
                     </div>
                     <span className={`badge ${s.online ? 'badge-green' : 'badge-red'}`} style={{flexShrink:0}}>
-                      <span className={`dot ${s.online ? 'dot-live' : ''}`}/>{s.online ? 'онлайн' : 'офлайн'}
+                      <span className={`dot ${s.online ? 'dot-live' : ''}`}/>{s.online ? t.online : t.offline}
                     </span>
                   </div>
                   <div style={{padding:'12px 20px',display:'flex',gap:8,flexWrap:'wrap',borderBottom:'1px solid var(--b1)'}}>
-                    <StatPill count={total}  label="всего"      color="124,111,247" dot={null}/>
-                    <StatPill count={active} label="активных"   color="34,197,94"  dot="dot-live"/>
-                    {s.online_users > 0 && <StatPill count={s.online_users} label="онлайн" color="56,189,248" dot="dot-live"/>}
-                    {stopped > 0 && <StatPill count={stopped} label="остановлен" color="251,113,133" dot=""/>}
+                    <StatPill count={total}  label={t.total}   color="124,111,247" dot={null}/>
+                    <StatPill count={active} label={t.active}  color="34,197,94"  dot="dot-live"/>
+                    {s.online_users > 0 && <StatPill count={s.online_users} label={t.online} color="56,189,248" dot="dot-live"/>}
+                    {stopped > 0 && <StatPill count={stopped} label={t.stopped} color="251,113,133" dot=""/>}
                   </div>
                   <div style={{padding:'12px 20px',display:'flex',gap:8}}>
                     <button className="btn btn-primary btn-sm" style={{flex:1,justifyContent:'center'}}
                       onClick={e => { e.stopPropagation(); onManageNode(node); }}>
-                      <I.Users/> Клиенты
+                      <I.Users/> {t.clients}
                     </button>
                     <button className="btn btn-secondary btn-sm" style={{flex:1,justifyContent:'center'}}
                       onClick={e => { e.stopPropagation(); onSelectNode(node); }}>
-                      <I.Server/> Нода
+                      <I.Server/> {t.nodes}
                     </button>
                   </div>
                 </div>
@@ -108,7 +110,8 @@ export default function Dashboard({ nodes, onSelectNode, onManageNode }) {
             {!nodes.length && (
               <div style={{gridColumn:'1/-1'}}>
                 <div className="empty"><div className="empty-icon"><I.Server/></div>
-                  <div className="empty-title">Нет нод</div><div className="empty-desc">Добавь первую ноду</div>
+                  <div className="empty-title">{t.noNodesTitle}</div>
+                  <div className="empty-desc">{t.noNodesDesc}</div>
                 </div>
               </div>
             )}

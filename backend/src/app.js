@@ -3,10 +3,38 @@ const express = require('express');
 const cors    = require('cors');
 const path    = require('path');
 const crypto  = require('crypto');
+const https   = require('https');
 const db      = require('./db');
 const ssh     = require('./ssh');
 const nodeCache = require('./nodeCache');
 const authenticator = require('./totp');
+
+// ── Telegram ───────────────────────────────────────────────
+function getTgSettings() {
+  const get = (k) => db.prepare("SELECT value FROM settings WHERE key=?").get(k)?.value || '';
+  return {
+    token:        get('tg_token'),
+    chat_id:      get('tg_chat_id'),
+    notify_stop:  get('tg_notify_stop')  !== '0',
+    notify_node:  get('tg_notify_node')  !== '0',
+  };
+}
+
+async function sendTelegram(text) {
+  const { token, chat_id } = getTgSettings();
+  if (!token || !chat_id) return;
+  return new Promise(resolve => {
+    const body = JSON.stringify({ chat_id, text, parse_mode: 'HTML' });
+    const req = https.request({
+      hostname: 'api.telegram.org',
+      path: `/bot${token}/sendMessage`,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+    }, res => { res.resume(); resolve(res.statusCode); });
+    req.on('error', e => { console.warn('[TG]', e.message); resolve(null); });
+    req.write(body); req.end();
+  });
+}
 
 // ── Config ────────────────────────────────────────────────
 const AUTH_TOKEN = process.env.AUTH_TOKEN || 'changeme';
@@ -47,6 +75,14 @@ runMigrations();
 
 // ── Node cache (background polling every 10s) ─────────────
 nodeCache.start(db);
+nodeCache.setStatusChangeCallback((node, online) => {
+  const { notify_node } = getTgSettings();
+  if (!notify_node) return;
+  const msg = online
+    ? `✅ <b>${node.name}</b> снова онлайн\n🌐 ${node.host}`
+    : `🔴 <b>${node.name}</b> недоступна!\n🌐 ${node.host}`;
+  sendTelegram(msg).catch(() => {});
+});
 
 // ── App ───────────────────────────────────────────────────
 const app = express();
@@ -57,6 +93,22 @@ app.use(express.static(path.join(__dirname, '../public')));
 // ── Public endpoints (no auth) ────────────────────────────
 app.get('/api/version', (req, res) => {
   res.json({ version: pkgVersion });
+});
+
+const fs = require('fs');
+const LOGO_PATH = process.env.DATA_DIR ? path.join(process.env.DATA_DIR, 'logo.json') : path.join(__dirname, '../../data/logo.json');
+
+app.get('/logo', (req, res) => {
+  try {
+    if (!fs.existsSync(LOGO_PATH)) return res.status(404).end();
+    const { data } = JSON.parse(fs.readFileSync(LOGO_PATH, 'utf8'));
+    const m = data.match(/^data:([^;]+);base64,(.+)$/);
+    if (!m) return res.status(400).end();
+    const buf = Buffer.from(m[2], 'base64');
+    res.setHeader('Content-Type', m[1]);
+    res.setHeader('Cache-Control', 'no-cache');
+    res.send(buf);
+  } catch { res.status(500).end(); }
 });
 
 // ── TOTP Session store (SQLite-backed, 24h TTL) ───────────
@@ -167,6 +219,46 @@ app.post('/api/totp/disable', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Logo ──────────────────────────────────────────────────
+app.post('/api/settings/logo', (req, res) => {
+  try {
+    const { data } = req.body;
+    if (!data || !data.startsWith('data:image/')) return res.status(400).json({ error: 'Invalid image data' });
+    const dir = path.dirname(LOGO_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(LOGO_PATH, JSON.stringify({ data }));
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/settings/logo', (req, res) => {
+  try {
+    if (fs.existsSync(LOGO_PATH)) fs.unlinkSync(LOGO_PATH);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Telegram settings ──────────────────────────────────────
+app.get('/api/settings/telegram', (req, res) => {
+  res.json(getTgSettings());
+});
+
+app.post('/api/settings/telegram', async (req, res) => {
+  const { token, chat_id, notify_stop, notify_node } = req.body;
+  const set = (k, v) => db.prepare("INSERT OR REPLACE INTO settings (key,value) VALUES (?,?)").run(k, v);
+  set('tg_token',       token    || '');
+  set('tg_chat_id',     chat_id  || '');
+  set('tg_notify_stop', notify_stop === false ? '0' : '1');
+  set('tg_notify_node', notify_node === false ? '0' : '1');
+  res.json({ ok: true });
+});
+
+app.post('/api/settings/telegram/test', async (req, res) => {
+  const code = await sendTelegram('✅ MTG AdminPanel: тест уведомлений работает!');
+  if (code === 200) res.json({ ok: true });
+  else res.status(400).json({ error: `Telegram вернул код ${code}. Проверь токен и chat_id.` });
+});
+
 // ── Nodes ─────────────────────────────────────────────────
 app.get('/api/nodes', (req, res) => {
   res.json(db.prepare('SELECT id, name, host, ssh_user, ssh_port, base_dir, start_port, created_at, flag, agent_port FROM nodes').all());
@@ -193,7 +285,7 @@ app.post('/api/nodes', async (req, res) => {
   if ((ssh_key || ssh_password) && auto_install_agent !== false) {
     const node = db.prepare('SELECT * FROM nodes WHERE id = ?').get(nodeId);
     const token = process.env.AGENT_TOKEN || 'mtg-agent-secret';
-    const RAW = 'https://raw.githubusercontent.com/MaksimTMB/mtg-adminpanel/claude/fix-production-bugs-h4e08/mtg-agent';
+    const RAW = 'https://raw.githubusercontent.com/MaksimTMB/mtg-adminpanel/main/mtg-agent';
     const cmd = [
       `mkdir -p /opt/mtg-agent && cd /opt/mtg-agent`,
       `wget -q "${RAW}/main.py" -O main.py || curl -fsSL "${RAW}/main.py" -o main.py`,
@@ -250,11 +342,11 @@ app.post('/api/nodes/:id/update-agent', async (req, res) => {
   const node = db.prepare('SELECT * FROM nodes WHERE id = ?').get(req.params.id);
   if (!node) return res.status(404).json({ error: 'Not found' });
   const token = process.env.AGENT_TOKEN || 'mtg-agent-secret';
-  const RAW = 'https://raw.githubusercontent.com/MaksimTMB/mtg-adminpanel/claude/fix-production-bugs-h4e08/mtg-agent';
+  const RAW = 'https://raw.githubusercontent.com/MaksimTMB/mtg-adminpanel/main/mtg-agent';
   const cmd = [
     `mkdir -p /opt/mtg-agent && cd /opt/mtg-agent`,
-    `wget -q "${RAW}/main.py" -O main.py`,
-    `wget -q "${RAW}/docker-compose.yml" -O docker-compose.yml`,
+    `wget -q "${RAW}/main.py" -O main.py || curl -fsSL "${RAW}/main.py" -o main.py`,
+    `wget -q "${RAW}/docker-compose.yml" -O docker-compose.yml || curl -fsSL "${RAW}/docker-compose.yml" -o docker-compose.yml`,
     `echo "AGENT_TOKEN=${token}" > .env`,
     `docker compose down 2>/dev/null || true`,
     `docker compose up -d`,
@@ -773,7 +865,10 @@ async function recordHistory() {
 async function stopExpiredUsers() {
   // NOTE: do NOT use JOIN — n.* columns overwrite u.* columns
   const expired = db.prepare(
-    "SELECT * FROM users WHERE expires_at IS NOT NULL AND expires_at < datetime('now') AND status != 'stopped'"
+    "SELECT * FROM users WHERE status != 'stopped' AND (" +
+    "  (expires_at IS NOT NULL AND expires_at < datetime('now'))" +
+    "  OR (billing_paid_until IS NOT NULL AND billing_paid_until < datetime('now') AND billing_status = 'active')" +
+    ")"
   ).all();
   if (!expired.length) return;
   await Promise.allSettled(expired.map(async u => {
@@ -784,6 +879,12 @@ async function stopExpiredUsers() {
       await ssh.stopRemoteUser(node, u.name);
       db.prepare("UPDATE users SET status='stopped' WHERE id=?").run(u.id);
       console.log(`🛑 Auto-stopped expired user: ${u.name}@${u.node_id}`);
+      const { notify_stop } = getTgSettings();
+      if (notify_stop) {
+        const reason = u.billing_paid_until && new Date(u.billing_paid_until) < new Date()
+          ? '💳 просрочен биллинг' : '⏰ истёк срок действия';
+        sendTelegram(`🛑 <b>${u.name}</b> остановлен автоматически\n📡 Нода: <b>${node.name}</b>\n📌 Причина: ${reason}`).catch(() => {});
+      }
     } catch (e) { console.error(`Failed to stop expired user ${u.name}:`, e.message); }
   }));
 }
