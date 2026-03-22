@@ -40,6 +40,7 @@ export default function UsersPage({ node, onBack }) {
   const [qrU, setQrU]         = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
   const [history, setHistory] = useState({});
+  const [search, setSearch]   = useState('');
 
   const loadHistory = useCallback(async (userList) => {
     if (!userList.length) return;
@@ -143,6 +144,14 @@ export default function UsersPage({ node, onBack }) {
     : iv === 'monthly' ? t.intervalMonthly.split(' ')[1] || 'mo'
     : t.intervalYearly.split(' ')[1] || 'yr';
 
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? users.filter(u =>
+        u.name.toLowerCase().includes(q) ||
+        (u.note && u.note.toLowerCase().includes(q)) ||
+        String(u.port).includes(q))
+    : users;
+
   return (
     <div className="pg">
       <div className="topbar users-topbar">
@@ -158,6 +167,9 @@ export default function UsersPage({ node, onBack }) {
         </div>
         <div className="topbar-right users-topbar-actions">
           {ref && <span className="refreshing"><span className="spin"/></span>}
+          <input className="form-input search-input" placeholder={t.searchPlaceholder}
+            value={search} onChange={e => setSearch(e.target.value)}
+            style={{width:160,height:30,padding:'0 10px',fontSize:13}}/>
           <button className="btn btn-ghost btn-sm" onClick={() => loadUsers(true)}><I.RefreshCw/></button>
           <button className="btn btn-secondary btn-sm" onClick={syncUsers}><I.Sync/> {t.syncBtn}</button>
           <button className="btn btn-primary btn-sm" onClick={() => setModal(true)}><I.Plus/> {t.add}</button>
@@ -180,7 +192,7 @@ export default function UsersPage({ node, onBack }) {
                 <th>{t.colActions}</th>
               </tr></thead>
               <tbody>
-                {users.map(u => {
+                {filtered.map(u => {
                   const devLimit = u.max_devices;
                   const devOver  = devLimit && u.connections > devLimit;
                   const hist     = history[u.name];
@@ -252,7 +264,7 @@ export default function UsersPage({ node, onBack }) {
                     </tr>
                   );
                 })}
-                {!users.length && <tr><td colSpan={9}><div className="empty"><div className="empty-icon"><I.Users/></div><div className="empty-title">{t.noClients}</div><div className="empty-desc">{t.noNodesDesc}</div></div></td></tr>}
+                {!filtered.length && <tr><td colSpan={9}><div className="empty"><div className="empty-icon"><I.Users/></div><div className="empty-title">{q ? t.searchNoResults : t.noClients}</div></div></td></tr>}
               </tbody>
             </table>
           </div>
@@ -261,7 +273,7 @@ export default function UsersPage({ node, onBack }) {
 
       {!loading && (
         <div className="mobile-user-list">
-          {users.map(u => {
+          {filtered.map(u => {
             const devLimit = u.max_devices;
             const devOver  = devLimit && u.connections > devLimit;
             const hist     = history[u.name];

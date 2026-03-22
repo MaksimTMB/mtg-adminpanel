@@ -231,6 +231,101 @@ mtg-adminpanel/
 
 ---
 
+## API
+
+Все защищённые эндпоинты требуют заголовок `x-auth-token: <AUTH_TOKEN>`.
+Если включена 2FA — дополнительно `x-totp-session: <session>`.
+
+### Публичные (без авторизации)
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| `GET` | `/api/version` | Версия панели `{ version }` |
+| `GET` | `/logo` | Логотип панели (PNG/JPG) |
+
+### Аутентификация и 2FA
+
+| Метод | Путь | Тело | Описание |
+|-------|------|------|----------|
+| `GET` | `/api/totp/status` | — | Статус 2FA `{ enabled }` |
+| `POST` | `/api/totp/setup` | — | Генерирует секрет `{ secret, qr }` |
+| `POST` | `/api/totp/verify` | `{ code }` | Подтверждает и включает 2FA |
+| `POST` | `/api/totp/session` | `{ code }` | Создаёт сессию `{ session }` (TTL 24ч) |
+| `POST` | `/api/totp/disable` | `{ code }` | Отключает 2FA |
+
+### Настройки
+
+| Метод | Путь | Тело | Описание |
+|-------|------|------|----------|
+| `POST` | `/api/settings/logo` | `{ data }` | Загружает логотип (base64 data URL) |
+| `DELETE` | `/api/settings/logo` | — | Удаляет логотип |
+
+### Ноды
+
+| Метод | Путь | Тело | Описание |
+|-------|------|------|----------|
+| `GET` | `/api/nodes` | — | Список всех нод |
+| `GET` | `/api/nodes/counts` | — | Кол-во клиентов по нодам `{ nodeId: count }` |
+| `POST` | `/api/nodes` | `{ name, host, ssh_user, ssh_port, ssh_key\|ssh_password, base_dir, start_port, flag, agent_port }` | Добавить ноду |
+| `PUT` | `/api/nodes/:id` | (те же поля) | Обновить ноду |
+| `DELETE` | `/api/nodes/:id` | — | Удалить ноду |
+| `GET` | `/api/nodes/:id/check` | — | Проверить SSH-соединение `{ online }` |
+| `GET` | `/api/nodes/:id/summary` | — | Сводка ноды: статус + все клиенты + трафик |
+| `GET` | `/api/nodes/:id/traffic` | — | Трафик по клиентам через SSH |
+| `GET` | `/api/status` | — | Статус всех нод из кэша (мгновенно) |
+
+### MTG Agent
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| `GET` | `/api/nodes/:id/check-agent` | Проверить доступность агента `{ available }` |
+| `POST` | `/api/nodes/:id/update-agent` | Обновить агент через SSH `{ ok, output }` |
+| `GET` | `/api/nodes/:id/agent-version` | Версия агента из кэша `{ version, available }` |
+| `GET` | `/api/nodes/:id/mtg-version` | Версия MTG-образа на ноде |
+| `POST` | `/api/nodes/:id/mtg-update` | Обновить MTG-образ (`docker pull`) |
+
+### Клиенты (Users)
+
+| Метод | Путь | Тело | Описание |
+|-------|------|------|----------|
+| `GET` | `/api/nodes/:id/users` | — | Список клиентов ноды (из кэша, мгновенно) |
+| `POST` | `/api/nodes/:id/users` | `{ name, note, expires_at, traffic_limit_gb }` | Создать клиента |
+| `PUT` | `/api/nodes/:id/users/:name` | см. ниже | Обновить настройки клиента |
+| `DELETE` | `/api/nodes/:id/users/:name` | — | Удалить клиента |
+| `POST` | `/api/nodes/:id/users/:name/start` | — | Запустить прокси клиента |
+| `POST` | `/api/nodes/:id/users/:name/stop` | — | Остановить прокси клиента |
+| `POST` | `/api/nodes/:id/users/:name/reset-traffic` | — | Сбросить счётчик трафика |
+| `GET` | `/api/nodes/:id/users/:name/history` | — | История подключений за 24ч (5-мин интервалы) |
+| `POST` | `/api/nodes/:id/sync` | — | Синхронизировать клиентов с нодой `{ imported, total }` |
+
+**Поля для `PUT /api/nodes/:id/users/:name`:**
+
+```json
+{
+  "note": "string",
+  "expires_at": "2025-12-31T00:00:00",
+  "traffic_limit_gb": 10.0,
+  "max_devices": 3,
+  "traffic_reset_interval": "daily|monthly|yearly|null",
+  "billing_price": 299.0,
+  "billing_currency": "RUB|USD|EUR|USDT",
+  "billing_period": "weekly|monthly|yearly",
+  "billing_paid_until": "2025-12-31T00:00:00",
+  "billing_status": "active|suspended|cancelled"
+}
+```
+
+### Автоматизация (фон)
+
+| Интервал | Действие |
+|----------|----------|
+| каждые 10 сек | Кэш нод: статус, клиенты, трафик, версия агента |
+| каждые 5 мин | Запись истории подключений (хранится 24ч) |
+| каждые 60 мин | Автостоп клиентов: истёкший срок ИЛИ просроченный биллинг |
+| каждые 5 мин | Автосброс трафика (по расписанию клиента) |
+
+---
+
 ## License
 
 MIT

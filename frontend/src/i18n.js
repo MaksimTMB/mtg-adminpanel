@@ -126,6 +126,8 @@ const T = {
     intervalNever: 'Не сбрасывать', intervalDaily: 'Каждый день',
     intervalMonthly: 'Каждый месяц', intervalYearly: 'Каждый год',
     saved: 'Сохранено',
+    // Search
+    searchPlaceholder: 'Поиск...', searchNoResults: 'Ничего не найдено',
     // Billing
     billingSectionTitle: 'Биллинг',
     billingPrice: 'Стоимость', billingCurrency: 'Валюта', billingPeriod: 'Период',
@@ -273,6 +275,8 @@ const T = {
     intervalNever: 'Never', intervalDaily: 'Every day',
     intervalMonthly: 'Every month', intervalYearly: 'Every year',
     saved: 'Saved',
+    // Search
+    searchPlaceholder: 'Search...', searchNoResults: 'Nothing found',
     // Billing
     billingSectionTitle: 'Billing',
     billingPrice: 'Price', billingCurrency: 'Currency', billingPeriod: 'Period',

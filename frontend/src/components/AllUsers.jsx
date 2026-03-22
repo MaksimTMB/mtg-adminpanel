@@ -38,6 +38,7 @@ export default function AllUsers({ nodes, onSelectNode }) {
   const [editU, setEditU]           = useState(null);   // { user, nodeId }
   const [qrU, setQrU]               = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);   // { user, nodeId }
+  const [search, setSearch]         = useState('');
 
   const loadHistory = useCallback(async (nodeId, userList) => {
     await Promise.allSettled(userList.map(async u => {
@@ -124,6 +125,9 @@ export default function AllUsers({ nodes, onSelectNode }) {
         </div>
         <div className="topbar-right">
           {refreshing && <span className="refreshing"><span className="spin"/></span>}
+          <input className="form-input search-input" placeholder={t.searchPlaceholder}
+            value={search} onChange={e => setSearch(e.target.value)}
+            style={{width:180,height:30,padding:'0 10px',fontSize:13}}/>
           <button className="btn btn-ghost btn-sm" onClick={() => load(true)}><I.RefreshCw/> {t.refresh}</button>
         </div>
       </div>
@@ -131,9 +135,17 @@ export default function AllUsers({ nodes, onSelectNode }) {
       {loading ? <div className="loading-center"><span className="spin"/> {t.loading}</div> : (
         <div style={{display:'flex',flexDirection:'column',gap:16}}>
           {nodes.map(node => {
-            const users  = groups[node.id] || [];
+            const allNodeUsers = groups[node.id] || [];
+            const q = search.trim().toLowerCase();
+            const users = q
+              ? allNodeUsers.filter(u =>
+                  u.name.toLowerCase().includes(q) ||
+                  (u.note && u.note.toLowerCase().includes(q)) ||
+                  String(u.port).includes(q))
+              : allNodeUsers;
             const active = users.filter(u => u.running).length;
             const online = users.filter(u => u.is_online).length;
+            if (q && !users.length) return null;
             return (
               <div className="card" key={node.id}>
                 <div className="all-users-node-head" style={{marginBottom: users.length ? 16 : 0}}>
