@@ -130,6 +130,69 @@ export default function UsersPage({ node, onBack }) {
     n.has(name) ? n.delete(name) : n.add(name);
     return n;
   });
+
+  const periodLabel = (u) => (
+    <span className="traf">
+      <span className="rx">↓{u.current_traffic_rx || '0B'}</span>
+      <span className="tx"> ↑{u.current_traffic_tx || '0B'}</span>
+      {!u.running && (u.current_traffic_rx_bytes > 0 || u.current_traffic_tx_bytes > 0) && (
+        <span style={{fontSize:10,color:'var(--t3)',marginLeft:4}} title="Сохранено между остановками">⏸</span>
+      )}
+    </span>
+  );
+
+  const totalLabel = (u) => (
+    <span className="traf" title="Накопленный трафик за всё время, включая текущий период">
+      <span className="rx">↓{u.lifetime_traffic_rx || '0B'}</span>
+      <span className="tx"> ↑{u.lifetime_traffic_tx || '0B'}</span>
+    </span>
+  );
+
+  const intervalShort = (iv) =>
+    iv === 'daily' ? t.intervalDaily.split(' ')[1] || 'day'
+    : iv === 'monthly' ? t.intervalMonthly.split(' ')[1] || 'mo'
+    : t.intervalYearly.split(' ')[1] || 'yr';
+
+  const exportData = (format) => {
+    const rows = filtered.length ? filtered : users;
+    const filename = `${node.name}_clients_${new Date().toISOString().slice(0,10)}`;
+    if (format === 'json') {
+      const clean = rows.map(u => ({
+        name: u.name, port: u.port, status: u.running ? 'running' : 'stopped',
+        connections: u.connections, is_online: u.is_online,
+        traffic_rx: u.current_traffic_rx, traffic_tx: u.current_traffic_tx,
+        lifetime_rx: u.lifetime_traffic_rx, lifetime_tx: u.lifetime_traffic_tx,
+        expires_at: u.expires_at, traffic_limit_gb: u.traffic_limit_gb,
+        max_devices: u.max_devices, note: u.note,
+        billing_price: u.billing_price, billing_currency: u.billing_currency,
+        billing_period: u.billing_period, billing_paid_until: u.billing_paid_until,
+        billing_status: u.billing_status, link: u.link,
+      }));
+      const blob = new Blob([JSON.stringify(clean, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+      a.download = filename + '.json'; a.click();
+    } else {
+      const cols = ['name','port','status','connections','traffic_rx','traffic_tx','lifetime_rx','lifetime_tx','expires_at','traffic_limit_gb','max_devices','note','billing_price','billing_currency','billing_period','billing_paid_until','billing_status'];
+      const csv = [cols.join(','), ...rows.map(u => [
+        u.name, u.port, u.running ? 'running' : 'stopped', u.connections, u.current_traffic_rx, u.current_traffic_tx,
+        u.lifetime_traffic_rx, u.lifetime_traffic_tx, u.expires_at||'', u.traffic_limit_gb||'', u.max_devices||'',
+        `"${(u.note||'').replace(/"/g,'""')}"`,
+        u.billing_price||'', u.billing_currency||'', u.billing_period||'', u.billing_paid_until||'', u.billing_status||'',
+      ].join(','))].join('\n');
+      const blob = new Blob(['\uFEFF'+csv], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+      a.download = filename + '.csv'; a.click();
+    }
+  };
+
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? users.filter(u =>
+        u.name.toLowerCase().includes(q) ||
+        (u.note && u.note.toLowerCase().includes(q)) ||
+        String(u.port).includes(q))
+    : users;
+
   const allSelected = filtered.length > 0 && filtered.every(u => selected.has(u.name));
   const toggleAll   = () => setSelected(allSelected ? new Set() : new Set(filtered.map(u => u.name)));
 
@@ -156,36 +219,6 @@ export default function UsersPage({ node, onBack }) {
     loadUsers(true);
   };
 
-  const periodLabel = (u) => (
-    <span className="traf">
-      <span className="rx">↓{u.current_traffic_rx || '0B'}</span>
-      <span className="tx"> ↑{u.current_traffic_tx || '0B'}</span>
-      {!u.running && (u.current_traffic_rx_bytes > 0 || u.current_traffic_tx_bytes > 0) && (
-        <span style={{fontSize:10,color:'var(--t3)',marginLeft:4}} title="Сохранено между остановками">⏸</span>
-      )}
-    </span>
-  );
-
-  const totalLabel = (u) => (
-    <span className="traf" title="Накопленный трафик за всё время, включая текущий период">
-      <span className="rx">↓{u.lifetime_traffic_rx || '0B'}</span>
-      <span className="tx"> ↑{u.lifetime_traffic_tx || '0B'}</span>
-    </span>
-  );
-
-  const intervalShort = (iv) =>
-    iv === 'daily' ? t.intervalDaily.split(' ')[1] || 'day'
-    : iv === 'monthly' ? t.intervalMonthly.split(' ')[1] || 'mo'
-    : t.intervalYearly.split(' ')[1] || 'yr';
-
-  const q = search.trim().toLowerCase();
-  const filtered = q
-    ? users.filter(u =>
-        u.name.toLowerCase().includes(q) ||
-        (u.note && u.note.toLowerCase().includes(q)) ||
-        String(u.port).includes(q))
-    : users;
-
   return (
     <div className="pg">
       <div className="topbar users-topbar">
@@ -205,6 +238,13 @@ export default function UsersPage({ node, onBack }) {
             value={search} onChange={e => setSearch(e.target.value)}
             style={{width:160,height:30,padding:'0 10px',fontSize:13}}/>
           <button className="btn btn-ghost btn-sm" onClick={() => loadUsers(true)}><I.RefreshCw/></button>
+          <div className="export-wrap">
+            <button className="btn btn-ghost btn-sm" title={t.exportTitle}><I.Download/> {t.exportTitle}</button>
+            <div className="export-menu">
+              <div className="export-item" onClick={() => exportData('csv')}><I.Download/> CSV</div>
+              <div className="export-item" onClick={() => exportData('json')}><I.Download/> JSON</div>
+            </div>
+          </div>
           <button className="btn btn-secondary btn-sm" onClick={syncUsers}><I.Sync/> {t.syncBtn}</button>
           <button className="btn btn-primary btn-sm" onClick={() => setModal(true)}><I.Plus/> {t.add}</button>
         </div>
