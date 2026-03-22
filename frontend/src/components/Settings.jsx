@@ -9,6 +9,29 @@ import * as I from '../icons.jsx';
 export default function Settings() {
   const { t, lang, setLang, theme, setTheme, logo, setLogo, fetchLogo } = useAppCtx();
 
+  // ── Telegram ───────────────────────────────────────────
+  const [tg, setTg]           = useState({ token:'', chat_id:'', notify_stop:true, notify_node:true });
+  const [tgSaving, setTgSaving] = useState(false);
+  const [tgTesting, setTgTesting] = useState(false);
+
+  useEffect(() => {
+    api('GET', '/api/settings/telegram').then(r => setTg(r)).catch(() => {});
+  }, []);
+
+  const saveTg = async () => {
+    setTgSaving(true);
+    try { await api('POST', '/api/settings/telegram', tg); toast(t.saved, 'success'); }
+    catch(e) { toast(e.message, 'error'); }
+    finally { setTgSaving(false); }
+  };
+
+  const testTg = async () => {
+    setTgTesting(true);
+    try { await api('POST', '/api/settings/telegram/test'); toast(t.tgTestOk, 'success'); }
+    catch(e) { toast(e.message || t.tgTestFail, 'error'); }
+    finally { setTgTesting(false); }
+  };
+
   // ── 2FA ───────────────────────────────────────────────
   const [enabled,  setEnabled]  = useState(false);
   const [data,     setData]     = useState(null);
@@ -150,6 +173,50 @@ export default function Settings() {
             </div>
           </div>
           <input ref={fileRef} type="file" accept="image/*" style={{display:'none'}} onChange={handleLogoFile}/>
+        </div>
+      </div>
+
+      {/* ── Telegram ────────────────────────────────────── */}
+      <div className="card" style={{maxWidth:520,marginBottom:16}}>
+        <div className="card-header">
+          <div className="card-title"><I.Activity/> {t.tgTitle}</div>
+          <span className={`badge ${tg.token && tg.chat_id ? 'badge-green' : 'badge-red'}`}>
+            {tg.token && tg.chat_id ? t.tgEnabled : t.tgDisabled}
+          </span>
+        </div>
+        <p style={{fontSize:13,color:'var(--t3)',marginBottom:16}}>{t.tgHint}</p>
+        <div className="form-group">
+          <label className="form-label">{t.tgTokenLabel}</label>
+          <input className="form-input" placeholder="123456789:AAF..." value={tg.token}
+            onChange={e => setTg(x => ({...x, token: e.target.value}))}/>
+        </div>
+        <div className="form-group">
+          <label className="form-label">{t.tgChatIdLabel}</label>
+          <input className="form-input" placeholder="-1001234567890" value={tg.chat_id}
+            onChange={e => setTg(x => ({...x, chat_id: e.target.value}))}/>
+        </div>
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:12,fontWeight:600,color:'var(--t3)',textTransform:'uppercase',letterSpacing:'1px',marginBottom:10}}>
+            {t.tgEventsLabel}
+          </div>
+          <label style={{display:'flex',alignItems:'center',gap:10,cursor:'pointer',marginBottom:8}}>
+            <input type="checkbox" checked={tg.notify_stop} onChange={e => setTg(x => ({...x, notify_stop: e.target.checked}))}
+              style={{width:16,height:16,cursor:'pointer'}}/>
+            <span style={{fontSize:13}}>{t.tgNotifyStop}</span>
+          </label>
+          <label style={{display:'flex',alignItems:'center',gap:10,cursor:'pointer'}}>
+            <input type="checkbox" checked={tg.notify_node} onChange={e => setTg(x => ({...x, notify_node: e.target.checked}))}
+              style={{width:16,height:16,cursor:'pointer'}}/>
+            <span style={{fontSize:13}}>{t.tgNotifyNode}</span>
+          </label>
+        </div>
+        <div style={{display:'flex',gap:8}}>
+          <button className="btn btn-primary btn-sm" onClick={saveTg} disabled={tgSaving}>
+            {tgSaving ? <span className="spin spin-sm"/> : <><I.Check/> {t.save}</>}
+          </button>
+          <button className="btn btn-ghost btn-sm" onClick={testTg} disabled={tgTesting || !tg.token || !tg.chat_id}>
+            {tgTesting ? <span className="spin spin-sm"/> : <><I.Wifi/> {t.tgTest}</>}
+          </button>
         </div>
       </div>
 

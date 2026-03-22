@@ -61,6 +61,14 @@ const T = {
     allUsersStats: (u, a, o, n) => `${u} клиентов · ${a} активных · ${o} онлайн · ${n} нод`,
     noClientsOnNode: 'Нет клиентов на этой ноде',
     manage: 'Управление',
+    // Telegram
+    tgTitle: 'Telegram уведомления', tgHint: 'Уведомления в Telegram-бот при автостопе клиентов и изменении статуса нод.',
+    tgEnabled: 'настроен', tgDisabled: 'не настроен',
+    tgTokenLabel: 'Bot Token', tgChatIdLabel: 'Chat ID',
+    tgEventsLabel: 'Уведомлять о', tgTest: 'Тест',
+    tgNotifyStop: 'Автостоп клиента (истёк срок / биллинг)',
+    tgNotifyNode: 'Нода ушла в офлайн / вернулась онлайн',
+    tgTestOk: 'Сообщение отправлено!', tgTestFail: 'Ошибка отправки. Проверь токен и chat_id.',
     // Settings
     settingsTitle: 'Настройки', appearance: 'Внешний вид',
     themeLabel: 'Тема', themeDark: 'Тёмная', themeLight: 'Светлая',
@@ -214,6 +222,14 @@ const T = {
     allUsersStats: (u, a, o, n) => `${u} clients · ${a} active · ${o} online · ${n} nodes`,
     noClientsOnNode: 'No clients on this node',
     manage: 'Manage',
+    // Telegram
+    tgTitle: 'Telegram notifications', tgHint: 'Get notified in Telegram when clients are auto-stopped or nodes change status.',
+    tgEnabled: 'configured', tgDisabled: 'not configured',
+    tgTokenLabel: 'Bot Token', tgChatIdLabel: 'Chat ID',
+    tgEventsLabel: 'Notify on', tgTest: 'Test',
+    tgNotifyStop: 'Client auto-stop (expired / billing)',
+    tgNotifyNode: 'Node went offline / came back online',
+    tgTestOk: 'Message sent!', tgTestFail: 'Send error. Check token and chat_id.',
     // Settings
     settingsTitle: 'Settings', appearance: 'Appearance',
     themeLabel: 'Theme', themeDark: 'Dark', themeLight: 'Light',

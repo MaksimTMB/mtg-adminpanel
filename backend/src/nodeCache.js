@@ -21,6 +21,9 @@ const REFRESH_INTERVAL = 10_000; // ms between full refreshes
 const cache = new Map();         // nodeId (number) → entry
 let _db = null;
 let _timer = null;
+let _onStatusChange = null; // callback(node, online: bool)
+
+function setStatusChangeCallback(fn) { _onStatusChange = fn; }
 
 // ── Public API ────────────────────────────────────────────
 
@@ -75,6 +78,13 @@ async function _refreshNode(node) {
     const newStatus      = statusResult.status === 'fulfilled' ? statusResult.value  : prev.status;
     const newRemoteUsers = usersResult.status  === 'fulfilled' ? usersResult.value   : prev.remoteUsers;
 
+    // Fire status-change callback when node goes online/offline
+    const wasOnline = prev.status?.online;
+    const isOnline  = newStatus?.online;
+    if (_onStatusChange && prev.updatedAt > 0 && wasOnline !== isOnline) {
+      try { _onStatusChange(node, isOnline); } catch (_) {}
+    }
+
     // SSH path always returns online_users: 0 — fill it in from remoteUsers connections
     if (newStatus && newStatus.online_users === 0 && newRemoteUsers && newRemoteUsers.length > 0) {
       const liveCount = newRemoteUsers.filter(u => (u.connections || 0) > 0).length;
@@ -108,4 +118,4 @@ async function _refreshAll() {
   }
 }
 
-module.exports = { start, get, refresh, invalidate };
+module.exports = { start, get, refresh, invalidate, setStatusChangeCallback };
