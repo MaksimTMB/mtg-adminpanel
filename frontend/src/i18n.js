@@ -128,6 +128,10 @@ const T = {
     saved: 'Сохранено',
     // Search
     searchPlaceholder: 'Поиск...', searchNoResults: 'Ничего не найдено',
+    // Bulk actions
+    bulkSelected: (n) => `Выбрано: ${n}`,
+    bulkDeleteTitle: 'Массовое удаление',
+    bulkDeleteMsg: (n) => `Удалить ${n} клиентов? Это действие необратимо.`,
     // Billing
     billingSectionTitle: 'Биллинг',
     billingPrice: 'Стоимость', billingCurrency: 'Валюта', billingPeriod: 'Период',
@@ -277,6 +281,10 @@ const T = {
     saved: 'Saved',
     // Search
     searchPlaceholder: 'Search...', searchNoResults: 'Nothing found',
+    // Bulk actions
+    bulkSelected: (n) => `Selected: ${n}`,
+    bulkDeleteTitle: 'Bulk delete',
+    bulkDeleteMsg: (n) => `Delete ${n} clients? This action is irreversible.`,
     // Billing
     billingSectionTitle: 'Billing',
     billingPrice: 'Price', billingCurrency: 'Currency', billingPeriod: 'Period',

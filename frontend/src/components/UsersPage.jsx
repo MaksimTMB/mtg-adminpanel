@@ -39,8 +39,11 @@ export default function UsersPage({ node, onBack }) {
   const [editU, setEditU]     = useState(null);
   const [qrU, setQrU]         = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
-  const [history, setHistory] = useState({});
-  const [search, setSearch]   = useState('');
+  const [history, setHistory]     = useState({});
+  const [search, setSearch]       = useState('');
+  const [selected, setSelected]   = useState(new Set());
+  const [bulkBusy, setBulkBusy]   = useState(false);
+  const [confirmBulk, setConfirmBulk] = useState(null); // 'delete'
 
   const loadHistory = useCallback(async (userList) => {
     if (!userList.length) return;
@@ -122,6 +125,37 @@ export default function UsersPage({ node, onBack }) {
     finally { setBusyFor(user.name + '_reset', false); }
   };
 
+  const toggleSelect = (name) => setSelected(s => {
+    const n = new Set(s);
+    n.has(name) ? n.delete(name) : n.add(name);
+    return n;
+  });
+  const allSelected = filtered.length > 0 && filtered.every(u => selected.has(u.name));
+  const toggleAll   = () => setSelected(allSelected ? new Set() : new Set(filtered.map(u => u.name)));
+
+  const bulkAction = async (action) => {
+    const targets = filtered.filter(u => selected.has(u.name));
+    setBulkBusy(true);
+    await Promise.allSettled(targets.map(u =>
+      api('POST', `/api/nodes/${node.id}/users/${u.name}/${action}`).catch(() => {})
+    ));
+    setSelected(new Set());
+    setBulkBusy(false);
+    loadUsers(true);
+  };
+
+  const bulkDelete = async () => {
+    const targets = filtered.filter(u => selected.has(u.name));
+    setBulkBusy(true);
+    await Promise.allSettled(targets.map(u =>
+      api('DELETE', `/api/nodes/${node.id}/users/${u.name}`).catch(() => {})
+    ));
+    setSelected(new Set());
+    setConfirmBulk(null);
+    setBulkBusy(false);
+    loadUsers(true);
+  };
+
   const periodLabel = (u) => (
     <span className="traf">
       <span className="rx">↓{u.current_traffic_rx || '0B'}</span>
@@ -176,11 +210,31 @@ export default function UsersPage({ node, onBack }) {
         </div>
       </div>
 
+      {selected.size > 0 && (
+        <div className="bulk-bar">
+          <span className="bulk-count">{t.bulkSelected(selected.size)}</span>
+          <button className="btn btn-primary btn-sm" onClick={() => bulkAction('start')} disabled={bulkBusy}>
+            {bulkBusy ? <span className="spin spin-sm"/> : <I.Play/>} {t.startTitle}
+          </button>
+          <button className="btn btn-ghost btn-sm" onClick={() => bulkAction('stop')} disabled={bulkBusy}>
+            {bulkBusy ? <span className="spin spin-sm"/> : <I.Pause/>} {t.stopTitle}
+          </button>
+          <button className="btn btn-danger btn-sm" onClick={() => setConfirmBulk('delete')} disabled={bulkBusy}>
+            <I.Trash/> {t.delete}
+          </button>
+          <button className="btn btn-ghost btn-sm" onClick={() => setSelected(new Set())}><I.X/></button>
+        </div>
+      )}
+
       <div className="card">
         {loading ? <div className="loading-center"><span className="spin"/> {t.loading}</div> : (
           <div className="table-wrap user-table-desktop">
             <table>
               <thead><tr>
+                <th style={{width:32}}>
+                  <input type="checkbox" checked={allSelected} onChange={toggleAll}
+                    style={{cursor:'pointer',width:15,height:15}}/>
+                </th>
                 <th>{t.colClient}</th>
                 <th>{t.colPort}</th>
                 <th>{t.colStatus}</th>
@@ -197,7 +251,11 @@ export default function UsersPage({ node, onBack }) {
                   const devOver  = devLimit && u.connections > devLimit;
                   const hist     = history[u.name];
                   return (
-                    <tr key={u.id}>
+                    <tr key={u.id} className={selected.has(u.name) ? 'row-selected' : ''}>
+                      <td>
+                        <input type="checkbox" checked={selected.has(u.name)} onChange={() => toggleSelect(u.name)}
+                          style={{cursor:'pointer',width:15,height:15}}/>
+                      </td>
                       <td><span style={{fontFamily:'var(--mono)',fontWeight:600,fontSize:14}}>{u.name}</span></td>
                       <td><span className="badge badge-purple">{u.port}</span></td>
                       <td>
@@ -264,7 +322,7 @@ export default function UsersPage({ node, onBack }) {
                     </tr>
                   );
                 })}
-                {!filtered.length && <tr><td colSpan={9}><div className="empty"><div className="empty-icon"><I.Users/></div><div className="empty-title">{q ? t.searchNoResults : t.noClients}</div></div></td></tr>}
+                {!filtered.length && <tr><td colSpan={10}><div className="empty"><div className="empty-icon"><I.Users/></div><div className="empty-title">{q ? t.searchNoResults : t.noClients}</div></div></td></tr>}
               </tbody>
             </table>
           </div>
@@ -363,6 +421,15 @@ export default function UsersPage({ node, onBack }) {
           confirmText={t.deleteClientBtn}
           onConfirm={() => remove(confirmDel)}
           onClose={() => setConfirmDel(null)}
+        />
+      )}
+      {confirmBulk === 'delete' && (
+        <ConfirmModal
+          title={t.bulkDeleteTitle}
+          message={t.bulkDeleteMsg(selected.size)}
+          confirmText={t.deleteClientBtn}
+          onConfirm={bulkDelete}
+          onClose={() => setConfirmBulk(null)}
         />
       )}
     </div>

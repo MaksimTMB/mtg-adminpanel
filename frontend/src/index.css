@@ -567,3 +567,17 @@ tbody tr:hover td { background: rgba(124,111,247,0.04); }
   outline: 2px solid rgba(124,111,247,0.55);
   outline-offset: -2px;
 }
+
+/* ── Bulk actions ──────────────────────────────────── */
+.bulk-bar {
+  display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+  background: var(--bg2); border: 1px solid var(--vi);
+  border-radius: 12px; margin-bottom: 12px;
+  box-shadow: 0 0 0 1px rgba(124,111,247,0.15), 0 4px 16px rgba(0,0,0,0.2);
+  flex-wrap: wrap;
+}
+.bulk-count {
+  font-size: 13px; font-weight: 600; color: var(--vi);
+  margin-right: 4px; flex: 1; min-width: 80px;
+}
+tr.row-selected > td { background: rgba(124,111,247,0.07); }
