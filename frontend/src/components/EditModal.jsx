@@ -27,6 +27,11 @@ export default function EditModal({ user, nodeId, onClose, onSave }) {
     traffic_limit_gb: user.traffic_limit_gb || '',
     max_devices: user.max_devices || '',
     traffic_reset_interval: user.traffic_reset_interval || 'never',
+    billing_price: user.billing_price || '',
+    billing_currency: user.billing_currency || 'RUB',
+    billing_period: user.billing_period || 'monthly',
+    billing_paid_until: user.billing_paid_until ? user.billing_paid_until.replace(' ', 'T').slice(0, 16) : '',
+    billing_status: user.billing_status || 'active',
   });
   const [loading, setLoading] = useState(false);
   const set = (k, v) => setF(x => ({...x, [k]: v}));
@@ -40,6 +45,11 @@ export default function EditModal({ user, nodeId, onClose, onSave }) {
         traffic_limit_gb: f.traffic_limit_gb ? parseFloat(f.traffic_limit_gb) : null,
         max_devices: f.max_devices ? parseInt(f.max_devices) : null,
         traffic_reset_interval: f.traffic_reset_interval !== 'never' ? f.traffic_reset_interval : null,
+        billing_price: f.billing_price ? parseFloat(f.billing_price) : null,
+        billing_currency: f.billing_currency,
+        billing_period: f.billing_period,
+        billing_paid_until: f.billing_paid_until || null,
+        billing_status: f.billing_status,
       });
       toast(t.saved, 'success');
       onSave();
@@ -108,6 +118,53 @@ export default function EditModal({ user, nodeId, onClose, onSave }) {
                 {t.nextReset} <span style={{color:'var(--t2)'}}>{new Date(user.next_reset_at).toLocaleString(t.dateLocale)}</span>
               </div>
             )}
+          </div>
+
+          <div style={{borderTop:'1px solid var(--b1)',paddingTop:14,marginTop:4}}>
+            <div style={{fontSize:13,fontWeight:600,marginBottom:10,display:'flex',alignItems:'center',gap:8}}>
+              <span style={{width:16,height:16,display:'inline-flex',flexShrink:0}}><I.CreditCard/></span>
+              {t.billingSectionTitle}
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+              <div className="form-group">
+                <label className="form-label">{t.billingPrice}</label>
+                <input className="form-input" type="number" placeholder="0" min="0" step="0.01"
+                  value={f.billing_price} onChange={e => set('billing_price', e.target.value)}/>
+              </div>
+              <div className="form-group">
+                <label className="form-label">{t.billingCurrency}</label>
+                <select className="form-input" value={f.billing_currency} onChange={e => set('billing_currency', e.target.value)}>
+                  <option value="RUB">RUB ₽</option>
+                  <option value="USD">USD $</option>
+                  <option value="EUR">EUR €</option>
+                  <option value="USDT">USDT</option>
+                </select>
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">{t.billingPeriod}</label>
+              <div className="radio-group">
+                {[['weekly',t.billingPeriodWeekly],['monthly',t.billingPeriodMonthly],['yearly',t.billingPeriodYearly]].map(([v,l]) => (
+                  <div key={v} className={`radio-btn ${f.billing_period === v ? 'on' : ''}`} onClick={() => set('billing_period', v)}>{l}</div>
+                ))}
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">{t.billingPaidUntil}</label>
+              <input className="form-input" type="datetime-local" value={f.billing_paid_until}
+                onChange={e => set('billing_paid_until', e.target.value)}/>
+              {f.billing_paid_until && new Date(f.billing_paid_until) < new Date() && (
+                <div style={{fontSize:11,color:'var(--red)',marginTop:5}}>{t.billingOverdueHint}</div>
+              )}
+            </div>
+            <div className="form-group">
+              <label className="form-label">{t.billingStatus}</label>
+              <div className="radio-group">
+                {[['active',t.billingStatusActive],['suspended',t.billingStatusSuspended],['cancelled',t.billingStatusCancelled]].map(([v,l]) => (
+                  <div key={v} className={`radio-btn ${f.billing_status === v ? 'on' : ''}`} onClick={() => set('billing_status', v)}>{l}</div>
+                ))}
+              </div>
+            </div>
           </div>
 
           {(user.total_traffic_rx_bytes > 0 || user.total_traffic_tx_bytes > 0) && (

@@ -808,7 +808,10 @@ async function recordHistory() {
 async function stopExpiredUsers() {
   // NOTE: do NOT use JOIN — n.* columns overwrite u.* columns
   const expired = db.prepare(
-    "SELECT * FROM users WHERE expires_at IS NOT NULL AND expires_at < datetime('now') AND status != 'stopped'"
+    "SELECT * FROM users WHERE status != 'stopped' AND (" +
+    "  (expires_at IS NOT NULL AND expires_at < datetime('now'))" +
+    "  OR (billing_paid_until IS NOT NULL AND billing_paid_until < datetime('now') AND billing_status = 'active')" +
+    ")"
   ).all();
   if (!expired.length) return;
   await Promise.allSettled(expired.map(async u => {

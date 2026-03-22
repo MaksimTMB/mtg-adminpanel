@@ -126,6 +126,13 @@ const T = {
     intervalNever: 'Не сбрасывать', intervalDaily: 'Каждый день',
     intervalMonthly: 'Каждый месяц', intervalYearly: 'Каждый год',
     saved: 'Сохранено',
+    // Billing
+    billingSectionTitle: 'Биллинг',
+    billingPrice: 'Стоимость', billingCurrency: 'Валюта', billingPeriod: 'Период',
+    billingPaidUntil: 'Оплачено до', billingStatus: 'Статус',
+    billingStatusActive: 'Активен', billingStatusSuspended: 'Приостановлен', billingStatusCancelled: 'Отменён',
+    billingPeriodWeekly: 'Неделя', billingPeriodMonthly: 'Месяц', billingPeriodYearly: 'Год',
+    billingOverdueHint: 'Оплата просрочена — прокси остановится автоматически',
     // QR modal
     qrTitle: 'QR-код для подключения', copyLink: 'Скопировать ссылку',
     // Version block
@@ -266,6 +273,13 @@ const T = {
     intervalNever: 'Never', intervalDaily: 'Every day',
     intervalMonthly: 'Every month', intervalYearly: 'Every year',
     saved: 'Saved',
+    // Billing
+    billingSectionTitle: 'Billing',
+    billingPrice: 'Price', billingCurrency: 'Currency', billingPeriod: 'Period',
+    billingPaidUntil: 'Paid until', billingStatus: 'Status',
+    billingStatusActive: 'Active', billingStatusSuspended: 'Suspended', billingStatusCancelled: 'Cancelled',
+    billingPeriodWeekly: 'Weekly', billingPeriodMonthly: 'Monthly', billingPeriodYearly: 'Yearly',
+    billingOverdueHint: 'Payment overdue — proxy will stop automatically',
     // QR modal
     qrTitle: 'QR code for connection', copyLink: 'Copy link',
     // Version block
