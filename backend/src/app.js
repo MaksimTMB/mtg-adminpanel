@@ -228,7 +228,7 @@ app.post('/api/nodes', async (req, res) => {
   if ((ssh_key || ssh_password) && auto_install_agent !== false) {
     const node = db.prepare('SELECT * FROM nodes WHERE id = ?').get(nodeId);
     const token = process.env.AGENT_TOKEN || 'mtg-agent-secret';
-    const RAW = 'https://raw.githubusercontent.com/MaksimTMB/mtg-adminpanel/claude/fix-production-bugs-h4e08/mtg-agent';
+    const RAW = 'https://raw.githubusercontent.com/MaksimTMB/mtg-adminpanel/main/mtg-agent';
     const cmd = [
       `mkdir -p /opt/mtg-agent && cd /opt/mtg-agent`,
       `wget -q "${RAW}/main.py" -O main.py || curl -fsSL "${RAW}/main.py" -o main.py`,
@@ -285,11 +285,11 @@ app.post('/api/nodes/:id/update-agent', async (req, res) => {
   const node = db.prepare('SELECT * FROM nodes WHERE id = ?').get(req.params.id);
   if (!node) return res.status(404).json({ error: 'Not found' });
   const token = process.env.AGENT_TOKEN || 'mtg-agent-secret';
-  const RAW = 'https://raw.githubusercontent.com/MaksimTMB/mtg-adminpanel/claude/fix-production-bugs-h4e08/mtg-agent';
+  const RAW = 'https://raw.githubusercontent.com/MaksimTMB/mtg-adminpanel/main/mtg-agent';
   const cmd = [
     `mkdir -p /opt/mtg-agent && cd /opt/mtg-agent`,
-    `wget -q "${RAW}/main.py" -O main.py`,
-    `wget -q "${RAW}/docker-compose.yml" -O docker-compose.yml`,
+    `wget -q "${RAW}/main.py" -O main.py || curl -fsSL "${RAW}/main.py" -o main.py`,
+    `wget -q "${RAW}/docker-compose.yml" -O docker-compose.yml || curl -fsSL "${RAW}/docker-compose.yml" -o docker-compose.yml`,
     `echo "AGENT_TOKEN=${token}" > .env`,
     `docker compose down 2>/dev/null || true`,
     `docker compose up -d`,

@@ -60,7 +60,7 @@ export default function NodeModal({ node, onClose, onSave }) {
     finally { setAgentUpdating(false); }
   };
 
-  const installCmd = `mkdir -p /opt/mtg-agent && cd /opt/mtg-agent && curl -fsSL https://raw.githubusercontent.com/MaksimTMB/mtg-adminpanel/dev/mtg-agent/install-agent.sh | bash`;
+  const installCmd = `mkdir -p /opt/mtg-agent && cd /opt/mtg-agent && curl -fsSL https://raw.githubusercontent.com/MaksimTMB/mtg-adminpanel/main/mtg-agent/install-agent.sh | bash`;
 
   const copyInstallCmd = async () => {
     try { await copyText(installCmd); toast(t.copied, 'success'); }
