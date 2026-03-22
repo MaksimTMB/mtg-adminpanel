@@ -396,6 +396,10 @@ tbody tr:hover td { background: rgba(124,111,247,0.04); }
   color: var(--t2); font-size: 13px;
 }
 .mobile-user-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.users-topbar-left { flex-wrap: wrap; }
+.users-topbar-node { min-width: 0; }
+.all-users-node-meta { min-width: 0; }
+.all-users-node-badges { flex-wrap: wrap; }
 
 .pg { animation: pg-in .22s var(--ease); }
 @keyframes pg-in { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:none} }
@@ -458,6 +462,53 @@ tbody tr:hover td { background: rgba(124,111,247,0.04); }
   .mobile-user-grid { grid-template-columns: 1fr; }
   .topbar-right { width: 100%; flex-wrap: wrap; }
   .topbar-right .btn { flex: 1 1 calc(50% - 8px); justify-content: center; }
+  .users-topbar { gap: 10px; }
+  .users-topbar-left {
+    width: 100%;
+    align-items: flex-start !important;
+    gap: 10px !important;
+  }
+  .users-topbar-left .btn {
+    flex: 0 0 auto;
+  }
+  .users-topbar-node {
+    flex: 1 1 100%;
+    width: 100%;
+    align-items: center;
+  }
+  .users-topbar-actions {
+    width: 100%;
+    margin-left: 44px;
+  }
+  .users-topbar-actions .refreshing {
+    width: 100%;
+    margin-bottom: 2px;
+  }
+  .all-users-node-head {
+    align-items: flex-start !important;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .all-users-node-meta {
+    width: 100%;
+  }
+  .all-users-node-meta-text {
+    width: 100%;
+  }
+  .all-users-node-actions {
+    width: 100%;
+    padding-left: 40px;
+    box-sizing: border-box;
+    display: block;
+  }
+  .all-users-node-badges {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .all-users-node-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
 }
 
 .mobile-bar {

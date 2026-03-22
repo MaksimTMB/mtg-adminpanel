@@ -109,10 +109,10 @@ export default function UsersPage({ node, onBack }) {
 
   return (
     <div className="pg">
-      <div className="topbar">
-        <div className="topbar-left" style={{display:'flex',alignItems:'center',gap:14}}>
+      <div className="topbar users-topbar">
+        <div className="topbar-left users-topbar-left" style={{display:'flex',alignItems:'center',gap:14}}>
           <button className="btn btn-ghost btn-sm" onClick={onBack}><I.ArrowLeft/> Назад</button>
-          <div style={{display:'flex',alignItems:'center',gap:10}}>
+          <div className="users-topbar-node" style={{display:'flex',alignItems:'center',gap:10}}>
             {node.flag && <img src={flagUrl(node.flag,'w80')} alt={node.flag} style={{width:30,height:22,objectFit:'cover',borderRadius:3,boxShadow:'0 1px 4px rgba(0,0,0,.3)',flexShrink:0}}/>}
             <div>
               <div className="page-title" style={{marginBottom:0}}><em>{node.name}</em></div>
@@ -120,7 +120,7 @@ export default function UsersPage({ node, onBack }) {
             </div>
           </div>
         </div>
-        <div className="topbar-right">
+        <div className="topbar-right users-topbar-actions">
           {ref && <span className="refreshing"><span className="spin"/> обновление</span>}
           <button className="btn btn-ghost btn-sm" onClick={() => loadUsers(true)}><I.RefreshCw/></button>
           <button className="btn btn-secondary btn-sm" onClick={syncUsers}><I.Sync/> Синхр.</button>
