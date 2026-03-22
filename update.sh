@@ -17,7 +17,6 @@ fi
 
 cd "$INSTALL_DIR"
 git pull
-docker compose build --no-cache
-docker compose up -d
+docker compose up -d --build
 echo "✅ Панель обновлена!"
 echo "$(docker ps | grep mtg-panel)"
