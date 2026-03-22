@@ -20,6 +20,7 @@ WORKDIR /app
 COPY backend/package.json ./
 RUN npm install --production
 
+COPY package.json /package.json
 COPY backend/src ./src
 
 # Copy built frontend (vite outputted to /build/backend/public)
