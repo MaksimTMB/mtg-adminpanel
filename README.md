@@ -2,7 +2,7 @@
 
 Веб-панель управления MTG прокси серверами (Telegram MTPROTO proxy). Управляй несколькими нодами и клиентами через единый интерфейс с мониторингом в реальном времени.
 
-![Version](https://img.shields.io/badge/version-2.3.0-blue)
+![Version](https://img.shields.io/badge/version-2.3.1-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Docker](https://img.shields.io/badge/docker-required-blue)
 
@@ -178,7 +178,7 @@ echo "Нода очищена."
 | `AUTH_TOKEN` | Пароль входа в панель | — (обязательно) |
 | `PORT` | Порт панели | `3000` |
 | `DATA_DIR` | Директория базы данных | `/data` |
-| `AGENT_TOKEN` | Токен для MTG Agent | `mtg-agent-secret` |
+| `AGENT_TOKEN` | Токен для MTG Agent | — (обязательно) |
 
 Файл `.env` создаётся автоматически при установке через `install.sh`.
 
@@ -220,6 +220,16 @@ mtg-adminpanel/
 ```
 
 ---
+
+## Что нового в v2.3.1
+
+- **Безопасность** — экранирование shell-аргументов в SSH-командах (защита от RCE)
+- **Безопасность** — `/api/totp/setup` блокируется если 2FA уже включена
+- **Безопасность** — токен принимается только через заголовок `x-auth-token`, из URL убран
+- **Безопасность** — паника при запуске с `AUTH_TOKEN=changeme`
+- **Исправление** — `PRAGMA foreign_keys = ON`: каскадное удаление теперь работает
+- **Исправление** — нормализация дат из фронтенда, автостоп по сроку срабатывает точно
+- `docker-compose.yml`: убраны небезопасные дефолты токенов
 
 ## Что нового в v2.3.0
 
