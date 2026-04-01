@@ -3,6 +3,9 @@ const http = require('http');
 
 const AGENT_TOKEN = process.env.AGENT_TOKEN || 'mtg-agent-secret';
 
+// Shell-quote a single argument (single-quote wrapping with internal ' escaped)
+function shq(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'"; }
+
 // ── Agent HTTP client ──────────────────────────────────────
 function agentRequest(host, port, path, method = 'GET', body = null) {
   return new Promise((resolve, reject) => {
@@ -237,7 +240,7 @@ async function createRemoteUser(node, name) {
   const baseDir = node.base_dir;
   const startPort = node.start_port || 4433;
   const cmd = [
-    'BASE=' + baseDir, 'NAME=' + name, 'START_PORT=' + startPort,
+    'BASE=' + shq(baseDir), 'NAME=' + shq(name), 'START_PORT=' + parseInt(startPort, 10),
     'USER_DIR="$BASE/$NAME"',
     'if [ -d "$USER_DIR" ]; then echo EXISTS; exit 1; fi',
     'MAX_PORT=$(grep -r "[0-9]*:3128" "$BASE" 2>/dev/null | grep -oE "[0-9]+:3128" | cut -d: -f1 | sort -n | tail -1)',
@@ -253,7 +256,7 @@ async function createRemoteUser(node, name) {
   if (r.output.includes('EXISTS')) {
     // Remote dir exists but user not in DB — read existing config files to recover port+secret
     const recoverCmd = [
-      'BASE=' + baseDir, 'NAME=' + name, 'USER_DIR="$BASE/$NAME"',
+      'BASE=' + shq(baseDir), 'NAME=' + shq(name), 'USER_DIR="$BASE/$NAME"',
       "SECRET=$(grep secret \"$USER_DIR/config.toml\" 2>/dev/null | awk -F'\"' '{print $2}')",
       "PORT=$(grep -o '[0-9]*:3128' \"$USER_DIR/docker-compose.yml\" 2>/dev/null | cut -d: -f1)",
       'echo "RECOVER|$PORT|$SECRET"'
@@ -283,7 +286,7 @@ async function removeRemoteUser(node, name) {
   }
   // SSH fallback
   const cmd = [
-    'BASE=' + node.base_dir, 'NAME=' + name, 'USER_DIR="$BASE/$NAME"',
+    'BASE=' + shq(node.base_dir), 'NAME=' + shq(name), 'USER_DIR="$BASE/$NAME"',
     'if [ -d "$USER_DIR" ]; then cd "$USER_DIR" && docker compose down 2>/dev/null; rm -rf "$USER_DIR"; fi',
     'echo DONE'
   ].join('\n');
@@ -303,7 +306,7 @@ async function stopRemoteUser(node, name) {
       // Agent failed or doesn't know this user — always fall through to SSH
     }
   }
-  await sshExec(node, 'cd ' + node.base_dir + '/' + name + ' && docker compose stop 2>/dev/null');
+  await sshExec(node, 'cd ' + shq(node.base_dir + '/' + name) + ' && docker compose stop 2>/dev/null');
 }
 
 async function startRemoteUser(node, name) {
@@ -315,7 +318,7 @@ async function startRemoteUser(node, name) {
       // Agent failed or doesn't know this user — always fall through to SSH
     }
   }
-  await sshExec(node, 'cd ' + node.base_dir + '/' + name + ' && docker compose up -d 2>/dev/null');
+  await sshExec(node, 'cd ' + shq(node.base_dir + '/' + name) + ' && docker compose up -d 2>/dev/null');
 }
 
 async function restartRemoteUser(node, name) {
@@ -327,7 +330,7 @@ async function restartRemoteUser(node, name) {
       // Agent failed or doesn't know this user — always fall through to SSH
     }
   }
-  await sshExec(node, `cd ${node.base_dir}/${name} && docker compose stop 2>/dev/null; docker compose up -d 2>/dev/null`);
+  await sshExec(node, 'cd ' + shq(node.base_dir + '/' + name) + ' && docker compose stop 2>/dev/null; docker compose up -d 2>/dev/null');
 }
 
 module.exports = {
