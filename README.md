@@ -348,3 +348,20 @@ mtg-adminpanel/
 ## License
 
 MIT
+
+---
+
+## Поддержка проекта
+
+Если панель полезна — буду рад благодарности:
+
+**TON / USDT (TON):** `UQDSP5_xUWlbjK1XubY_GpD4igBPzdNtAeBaDXAzfWHoWPhY`
+
+---
+
+## MTG Proxy — готовый сервис
+
+Не хочешь разворачивать своё? Попробуй готовый Telegram MTPROTO прокси:
+
+- 🤖 Бот: [@PodpiskaFreeNet_bot](https://t.me/PodpiskaFreeNet_bot)
+- 🌐 Сайт: [tg.maks68.com/buy/freenet](https://tg.maks68.com/buy/freenet)
