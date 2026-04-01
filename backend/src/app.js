@@ -38,6 +38,10 @@ async function sendTelegram(text) {
 
 // ── Config ────────────────────────────────────────────────
 const AUTH_TOKEN = process.env.AUTH_TOKEN || 'changeme';
+if (AUTH_TOKEN === 'changeme') {
+  console.error('FATAL: AUTH_TOKEN is set to the default "changeme". Set a strong password in .env and restart.');
+  process.exit(1);
+}
 const PORT       = process.env.PORT || 3000;
 
 // Version: /app/src/app.js → ../package.json = /app/package.json = backend/package.json in Docker
@@ -137,7 +141,7 @@ setInterval(() => {
 
 // ── Auth middleware ───────────────────────────────────────
 app.use('/api', (req, res, next) => {
-  const token = req.headers['x-auth-token'] || req.query.token;
+  const token = req.headers['x-auth-token'];
   if (token !== AUTH_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
   // TOTP validation — exempt setup/verify/status (needed to configure 2FA itself)
   const totpExempt = ['/totp/setup', '/totp/verify', '/totp/status', '/totp/disable', '/totp/session'];
@@ -177,6 +181,9 @@ app.get('/api/totp/status', (req, res) => {
 app.post('/api/totp/setup', async (req, res) => {
   const token = req.headers['x-auth-token'];
   if (token !== AUTH_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
+  if (isTotpEnabled()) {
+    return res.status(400).json({ error: '2FA already enabled. Disable it first via /api/totp/disable' });
+  }
   const secret = authenticator.generateSecret();
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('totp_secret', ?)").run(secret);
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('totp_enabled', '0')").run();
@@ -534,7 +541,7 @@ app.post('/api/nodes/:id/users', async (req, res) => {
     const { port, secret } = await ssh.createRemoteUser(node, name);
     const result = db.prepare(
       'INSERT INTO users (node_id, name, port, secret, note, expires_at, traffic_limit_gb) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).run(req.params.id, name, port, secret, note||'', expires_at||null, traffic_limit_gb||null);
+    ).run(req.params.id, name, port, secret, note||'', normalizeDate(expires_at), traffic_limit_gb||null);
     nodeCache.refresh(node);
     res.json({ id: result.lastInsertRowid, name, port, secret, note: note||'',
       expires_at: expires_at||null, traffic_limit_gb: traffic_limit_gb||null,
@@ -561,12 +568,12 @@ app.put('/api/nodes/:id/users/:name', (req, res) => {
     max_devices=?, traffic_reset_interval=?, next_reset_at=?
     WHERE node_id=? AND name=?`).run(
     note!==undefined ? note : user.note,
-    expires_at!==undefined ? expires_at : user.expires_at,
+    expires_at!==undefined ? normalizeDate(expires_at) : user.expires_at,
     traffic_limit_gb!==undefined ? traffic_limit_gb : user.traffic_limit_gb,
     billing_price!==undefined ? billing_price : user.billing_price,
     billing_currency||user.billing_currency||'RUB',
     billing_period||user.billing_period||'monthly',
-    billing_paid_until!==undefined ? billing_paid_until : user.billing_paid_until,
+    billing_paid_until!==undefined ? normalizeDate(billing_paid_until) : user.billing_paid_until,
     billing_status||user.billing_status||'active',
     max_devices!==undefined ? max_devices : user.max_devices,
     newInterval||null,
@@ -678,6 +685,13 @@ app.get('*', (req, res) => {
 });
 
 // ── Helpers ───────────────────────────────────────────────
+// Normalize datetime strings from frontend (YYYY-MM-DDTHH:mm → YYYY-MM-DD HH:MM:SS)
+// SQLite text-based date comparisons require the space separator to work correctly.
+function normalizeDate(dt) {
+  if (!dt) return null;
+  return String(dt).replace('T', ' ').slice(0, 19);
+}
+
 function calcNextReset(interval) {
   if (!interval || interval === 'never') return null;
   const now = new Date();
