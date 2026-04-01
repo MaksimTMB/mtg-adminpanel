@@ -359,9 +359,9 @@ MIT
 
 ---
 
-## MTG Proxy — готовый сервис
+## VPN-сервис на базе этой панели
 
-Не хочешь разворачивать своё? Попробуй готовый Telegram MTPROTO прокси:
+Не хочешь разворачивать своё? Подключайся к готовому VPN:
 
 - 🤖 Бот: [@PodpiskaFreeNet_bot](https://t.me/PodpiskaFreeNet_bot)
 - 🌐 Сайт: [tg.maks68.com/buy/freenet](https://tg.maks68.com/buy/freenet)
