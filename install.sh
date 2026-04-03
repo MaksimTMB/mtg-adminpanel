@@ -113,7 +113,7 @@ echo ""
 
 # ── Обновление системы ───────────────────────────────────────
 print_step "Обновление системы..."
-apt-get update -qq && apt-get upgrade -y -qq
+DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq
 print_ok "Система обновлена"
 
 # ── Установка зависимостей ───────────────────────────────────
