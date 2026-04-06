@@ -378,8 +378,13 @@ app.get('/api/nodes/:id/check', async (req, res) => {
 app.get('/api/nodes/:id/traffic', async (req, res) => {
   const node = db.prepare('SELECT * FROM nodes WHERE id = ?').get(req.params.id);
   if (!node) return res.status(404).json({ error: 'Not found' });
-  try { res.json(await ssh.getTraffic(node)); }
-  catch (_) { res.json({}); }
+  // Instant — served from background cache, never waits for SSH/agent
+  const remoteUsers = nodeCache.get(node.id).remoteUsers || [];
+  const traffic = {};
+  for (const u of remoteUsers) {
+    if (u?.traffic) traffic[u.name] = { rx: u.traffic.rx || '—', tx: u.traffic.tx || '—' };
+  }
+  res.json(traffic);
 });
 
 // Combined endpoint: instant — served from background cache

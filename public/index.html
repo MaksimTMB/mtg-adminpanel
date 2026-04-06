@@ -648,7 +648,60 @@ function useToast() {
   return toasts;
 }
 const toast = (msg, type) => _toast && _toast(msg, type);
-const copyText = (txt) => navigator.clipboard.writeText(txt).then(() => toast('Скопировано!', 'success'));
+const copyText = async (txt) => {
+  const value = String(txt ?? '');
+  if (!value) {
+    toast('Нет данных для копирования', 'error');
+    return false;
+  }
+
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast('Скопировано!', 'success');
+      return true;
+    } catch {}
+  }
+
+  const input = document.createElement('textarea');
+  input.value = value;
+  input.setAttribute('readonly', '');
+  input.style.position = 'fixed';
+  input.style.top = '0';
+  input.style.left = '0';
+  input.style.opacity = '0';
+  input.style.pointerEvents = 'none';
+  document.body.appendChild(input);
+
+  const selection = document.getSelection();
+  const savedRanges = [];
+  if (selection) {
+    for (let i = 0; i < selection.rangeCount; i++) {
+      savedRanges.push(selection.getRangeAt(i).cloneRange());
+    }
+  }
+
+  input.focus({ preventScroll: true });
+  input.select();
+  input.setSelectionRange(0, input.value.length);
+
+  let copied = false;
+  try { copied = document.execCommand('copy'); } catch {}
+
+  document.body.removeChild(input);
+  if (selection) {
+    selection.removeAllRanges();
+    savedRanges.forEach(range => selection.addRange(range));
+  }
+
+  if (copied) {
+    toast('Скопировано!', 'success');
+    return true;
+  }
+
+  toast('Не удалось скопировать ссылку', 'error');
+  return false;
+};
 
 function Toasts({ list }) {
   const icon = { success: <I.Check/>, error: <I.AlertCircle/>, info: <I.Info/> };
@@ -1391,14 +1444,10 @@ function NodePage({ node, onBack, onManage, onReload }) {
 
   const loadData = useCallback(async () => {
     try {
-      const [st, u, tr] = await Promise.allSettled([
-        api('GET', `/api/nodes/${node.id}/check`),
-        api('GET', `/api/nodes/${node.id}/users`),
-        api('GET', `/api/nodes/${node.id}/traffic`),
-      ]);
-      if(st.status==='fulfilled') setStatus(st.value);
-      if(u.status==='fulfilled')  setUsers(u.value||[]);
-      if(tr.status==='fulfilled') setTraffic(tr.value||{});
+      const s = await api('GET', `/api/nodes/${node.id}/summary`);
+      setStatus({ online: s.online });
+      setUsers(s.users || []);
+      setTraffic(s.traffic || {});
     } catch {} finally { setLoading(false); }
   }, [node.id]);
 
