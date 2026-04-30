@@ -349,21 +349,3 @@ mtg-adminpanel/
 
 MIT
 
----
-
-## Поддержка проекта
-
-Если панель полезна — буду рад благодарности:
-
-**TON / USDT (TON):** `UQDSP5_xUWlbjK1XubY_GpD4igBPzdNtAeBaDXAzfWHoWPhY`
-
----
-
-## FreeNet — VPN от автора
-
-[![FreeNet](https://github.com/MaksimTMB/freenet-assets/blob/main/ChatGPT%20Image%2019%20%D0%B4%D0%B5%D0%BA.%202025%20%D0%B3.,%2020_21_57.png?raw=true)](https://t.me/PodpiskaFreeNet_bot)
-
-Быстрый и стабильный VPN-сервис в Telegram — подключение за 30 секунд.
-
-- 🤖 Бот: [@PodpiskaFreeNet_bot](https://t.me/PodpiskaFreeNet_bot)
-- 🌐 Сайт: [tg.maks68.com/buy/freenet](https://tg.maks68.com/buy/freenet)
