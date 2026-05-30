@@ -130,6 +130,24 @@ else
     print_ok "Docker уже установлен ($(docker --version | cut -d' ' -f3 | tr -d ','))"
 fi
 
+# ── Установка Docker Compose v2 (плагин) ─────────────────────
+# get.docker.com ставит плагин вместе с Docker, но если Docker уже
+# был установлен из репозитория дистрибутива, плагина может не быть —
+# тогда `docker compose` падает с `unknown shorthand flag: 'd'`.
+if ! docker compose version &> /dev/null; then
+    print_step "Установка Docker Compose v2..."
+    apt-get install -y -qq docker-compose-plugin
+    if docker compose version &> /dev/null; then
+        print_ok "Docker Compose установлен ($(docker compose version --short))"
+    else
+        print_error "Не удалось установить docker-compose-plugin."
+        print_error "Установи его вручную и запусти скрипт повторно: https://docs.docker.com/compose/install/"
+        exit 1
+    fi
+else
+    print_ok "Docker Compose уже установлен ($(docker compose version --short))"
+fi
+
 # ── Клонирование репозитория ─────────────────────────────────
 print_step "Загрузка MTG AdminPanel..."
 if [ -d "$INSTALL_DIR" ]; then
@@ -167,7 +185,8 @@ sleep 3
 if docker ps | grep -q mtg-panel; then
     print_ok "Панель запущена"
 else
-    print_error "Ошибка запуска! Проверь: docker logs mtg-panel"
+    print_error "Ошибка запуска! Логи запуска:"
+    docker compose logs --tail 30 2>&1 || true
     exit 1
 fi
 
