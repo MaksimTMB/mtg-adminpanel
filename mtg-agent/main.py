@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import docker
 
-app = FastAPI(title="MTG Agent", version="2.2.1")
+app = FastAPI(title="MTG Agent", version="2.2.2")
 
 AGENT_TOKEN  = os.environ.get("AGENT_TOKEN", "mtg-agent-secret")
 BASE_DIR     = Path("/opt/mtg/users")
@@ -20,6 +20,21 @@ MTG_IMAGE    = "nineseconds/mtg:2"
 MTG_PORT     = 3128
 START_PORT   = int(os.environ.get("START_PORT", "4433"))
 MTG_PORT_HEX = "0C38"   # 3128 in hex
+# FakeTLS camouflage SNI pool. A SINGLE shared SNI (was hardcoded "google.com")
+# let RU DPI/TSPU classify every generated config as ONE fingerprint cohort —
+# the most likely reason configs "suddenly stopped" fleet-wide. Rotating per-user
+# across high-reputation, RU-allowed, non-Cloudflare domains breaks that cohort.
+# Override with env SNI_DOMAINS="a.com,b.com,...".
+FAKETLS_DOMAINS = [d.strip() for d in os.environ.get(
+    "SNI_DOMAINS",
+    "www.microsoft.com,www.bing.com,azure.microsoft.com,www.apple.com,"
+    "swcdn.apple.com,www.icloud.com,www.samsung.com,www.intel.com,"
+    "www.nvidia.com,update.microsoft.com,www.office.com,outlook.office365.com"
+).split(",") if d.strip()] or ["www.microsoft.com"]
+# Random high ports instead of a predictable 4433+ sequence (enumerable → a whole
+# per-node port range can be pre-blocked). Override with MTG_PORT_MIN/MAX.
+PORT_MIN     = int(os.environ.get("MTG_PORT_MIN", "20000"))
+PORT_MAX     = int(os.environ.get("MTG_PORT_MAX", "60000"))
 CACHE_TTL    = 10        # seconds before cache considered stale
 
 try:
@@ -213,19 +228,34 @@ def _cached_containers():
 
 # ── Filesystem helpers ────────────────────────────────────
 def _generate_secret() -> str:
-    return f"ee{secrets.token_hex(16)}{'google.com'.encode().hex()}"
+    # ee = FakeTLS; 16 random bytes; then the chosen SNI domain hex-encoded.
+    domain = secrets.choice(FAKETLS_DOMAINS)
+    return f"ee{secrets.token_hex(16)}{domain.encode().hex()}"
 
 
-def _next_port() -> int:
+def _used_mtg_ports() -> set:
     BASE_DIR.mkdir(parents=True, exist_ok=True)
-    max_port = START_PORT - 1
+    used = set()
     for d in BASE_DIR.iterdir():
         if not d.is_dir(): continue
         dc = d / "docker-compose.yml"
         if dc.exists():
             m = re.search(r"(\d+):3128", dc.read_text())
-            if m: max_port = max(max_port, int(m.group(1)))
-    return max_port + 1
+            if m: used.add(int(m.group(1)))
+    return used
+
+
+def _next_port() -> int:
+    # Random high port (not a predictable 4433+ run), avoiding collisions.
+    used = _used_mtg_ports()
+    for _ in range(500):
+        p = secrets.randbelow(PORT_MAX - PORT_MIN) + PORT_MIN
+        if p not in used:
+            return p
+    p = PORT_MIN
+    while p in used:
+        p += 1
+    return p
 
 
 def _write_files(user_dir: Path, name: str, port: int, secret: str):

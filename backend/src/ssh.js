@@ -3,6 +3,16 @@ const http = require('http');
 
 const AGENT_TOKEN = process.env.AGENT_TOKEN || 'mtg-agent-secret';
 
+// FakeTLS SNI pool — rotate per-user instead of a single hardcoded "google.com"
+// (a shared SNI lets RU DPI fingerprint every config as one cohort). High-
+// reputation, RU-allowed, non-Cloudflare domains. Override via env SNI_DOMAINS.
+const SNI_DOMAINS = (process.env.SNI_DOMAINS ||
+  'www.microsoft.com,www.bing.com,azure.microsoft.com,www.apple.com,' +
+  'swcdn.apple.com,www.icloud.com,www.samsung.com,www.intel.com,' +
+  'www.nvidia.com,update.microsoft.com,www.office.com,outlook.office365.com'
+).split(',').map(s => s.trim()).filter(Boolean);
+function pickSni() { return SNI_DOMAINS[Math.floor(Math.random() * SNI_DOMAINS.length)] || 'www.microsoft.com'; }
+
 // Shell-quote a single argument (single-quote wrapping with internal ' escaped)
 function shq(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'"; }
 
@@ -243,9 +253,10 @@ async function createRemoteUser(node, name) {
     'BASE=' + shq(baseDir), 'NAME=' + shq(name), 'START_PORT=' + parseInt(startPort, 10),
     'USER_DIR="$BASE/$NAME"',
     'if [ -d "$USER_DIR" ]; then echo EXISTS; exit 1; fi',
-    'MAX_PORT=$(grep -r "[0-9]*:3128" "$BASE" 2>/dev/null | grep -oE "[0-9]+:3128" | cut -d: -f1 | sort -n | tail -1)',
-    '[ -z "$MAX_PORT" ] && PORT=$START_PORT || PORT=$((MAX_PORT + 1))',
-    "SECRET=\"ee$(openssl rand -hex 16)$(echo -n 'google.com' | xxd -p)\"",
+    'USED=$(grep -rhoE "[0-9]+:3128" "$BASE" 2>/dev/null | cut -d: -f1 | sort -u)',
+    'PORT=$(( (RANDOM % 40000) + 20000 ))',
+    'while echo "$USED" | grep -qx "$PORT"; do PORT=$(( (RANDOM % 40000) + 20000 )); done',
+    'SECRET="ee$(openssl rand -hex 16)$(echo -n ' + shq(pickSni()) + ' | xxd -p)"',
     'mkdir -p "$USER_DIR"',
     'printf \'secret = "%s"\nbind-to = "0.0.0.0:3128"\n\' "$SECRET" > "$USER_DIR/config.toml"',
     'printf \'services:\n  mtg-%s:\n    image: nineseconds/mtg:2\n    container_name: mtg-%s\n    restart: unless-stopped\n    ports:\n      - "%s:3128"\n    volumes:\n      - %s/config.toml:/config.toml:ro\n    command: run /config.toml\n\' "$NAME" "$NAME" "$PORT" "$USER_DIR" > "$USER_DIR/docker-compose.yml"',
