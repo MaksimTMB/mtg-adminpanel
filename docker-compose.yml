@@ -4,7 +4,7 @@ services:
     container_name: mtg-panel
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${PORT:-3000}:3000"
     volumes:
       - ./data:/data
       - ./ssh_keys:/ssh_keys:ro
