@@ -1,8 +1,16 @@
+> # ⚠️ Проект закрыт — поддержка прекращена
+>
+> Разработка и поддержка **MTG AdminPanel** остановлены. Новые версии, исправления и ответы на issue/PR больше не выпускаются.
+> Последняя версия — **v2.3.4**. Репозиторий оставлен в публичном доступе в исторических целях; использование на свой страх и риск.
+
+---
+
 # MTG AdminPanel
 
 Веб-панель управления MTG прокси серверами (Telegram MTPROTO proxy). Управляй несколькими нодами и клиентами через единый интерфейс с мониторингом в реальном времени.
 
-![Version](https://img.shields.io/badge/version-2.3.1-blue)
+![Version](https://img.shields.io/badge/version-2.3.4-blue)
+![Status](https://img.shields.io/badge/status-discontinued-red)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Docker](https://img.shields.io/badge/docker-required-blue)
 
